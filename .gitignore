@@ -32,7 +32,8 @@ services/data/
 
 # IDE / Editor
 .aider*
-.claude/
+.claude/*
+!.claude/skills/
 .vscode/
 .idea/
 *.swp
