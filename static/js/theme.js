@@ -9,6 +9,8 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
 export const THEMES = {
+  carbon:     { bg:'#0A0A0A', fg:'#E8E8E8', panel:'#111111', border:'#2A2A2A', red:'#C61A1D' },
+  carbonLight:{ bg:'#FAFAFA', fg:'#1A1A1A', panel:'#FFFFFF', border:'#E5E5E5', red:'#C61A1D' },
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
   light:      { bg:'#f0ebe3', fg:'#5a5248', panel:'#faf6f0', border:'#d4cdc2', red:'#c47d5a' },
   midnight:   { bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', red:'#f85149' },
@@ -31,9 +33,11 @@ export const THEMES = {
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
 };
 
-const DEFAULT_THEME = 'dark';
-const LS_KEY = 'odysseus-theme';
-const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
+const DEFAULT_THEME = 'carbon';
+const LS_KEY = 'carbon-agent-theme';
+const LEGACY_LS_KEY = 'odysseus-theme';
+const CUSTOM_THEMES_KEY = 'carbon-agent-custom-themes';
+const LEGACY_CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
 
 const FONT_MAP = {
   mono: "'Fira Code', monospace",
@@ -46,6 +50,8 @@ const MAX_CUSTOM_THEMES = 8;
 
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
+  carbon:     'none',
+  carbonLight:'none',
   dark:       'none',
   light:      'dots',
   midnight:   'rain',
@@ -183,7 +189,7 @@ const ADV_KEYS = [
   { key: 'aiBubbleBg',         css: '--ai-bubble-bg',      label: 'AI Chat Bubble',   group: 'Chat Bubbles' },
   { key: 'bubbleBorder',       css: '--bubble-border',     label: 'Border Chat Bubble', group: 'Chat Bubbles' },
   { key: 'sidebarBg',          css: '--sidebar-bg',        label: 'Sidebar Bg',       group: 'Sidebar' },
-  { key: 'brandColor',         css: '--brand-color',       label: 'Odysseus Logo',    group: 'Sidebar' },
+  { key: 'brandColor',         css: '--brand-color',       label: ' Logo',    group: 'Sidebar' },
   { key: 'hamburgerColor',     css: '--hamburger-color',   label: 'Hamburger Menu',   group: 'Sidebar' },
   { key: 'inputBg',            css: '--input-bg',          label: 'Input Bg',         group: 'Chat Input / Prompt Area' },
   { key: 'inputBorder',        css: '--input-border',      label: 'Input Border',     group: 'Chat Input / Prompt Area' },
@@ -441,7 +447,15 @@ export function applyBgPattern(pattern) {
 }
 
 export function getSaved() {
-  const obj = Storage.getJSON(LS_KEY, null);
+  let obj = Storage.getJSON(LS_KEY, null);
+  // Migration: legacy 'odysseus-theme' -> 'carbon-agent-theme'
+  if (!obj) {
+    obj = Storage.getJSON(LEGACY_LS_KEY, null);
+    if (obj) {
+      Storage.setJSON(LS_KEY, obj);
+      Storage.remove(LEGACY_LS_KEY);
+    }
+  }
   // Migration: 'chatgpt' preset was renamed to 'gpt'
   if (obj && obj.name === 'chatgpt') obj.name = 'gpt';
   // Migration: 'sakura' preset was renamed to 'ume'
@@ -630,7 +644,7 @@ export function initThemeUI() {
         <span style="background:${c.fg}"></span>
         <span style="background:${c.red}"></span>
       </div>
-      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name)}
+      ${name === 'carbon' ? 'CarbonAgent' : (name === 'carbonLight' ? 'CarbonAgent Light' : (name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name)))}
     </div>
   `).join('');
 

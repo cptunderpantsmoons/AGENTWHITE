@@ -1,5 +1,5 @@
 /* ============================================ */
-/* Odysseus UI — Consolidated Stylesheet        */
+/*  UI — Consolidated Stylesheet        */
 /* ============================================ */
 
 
@@ -16,12 +16,12 @@
  */
 
 :root {
-  /* Core palette */
-  --bg: #282c34;
-  --fg: #9cdef2;
-  --panel: #111;
-  --border: #355a66;
-  --red: #e06c75;
+  /* Core palette — CarbonAgent brand */
+  --bg: #0A0A0A;
+  --fg: #E8E8E8;
+  --panel: #111111;
+  --border: #2A2A2A;
+  --red: #C61A1D;
   /* Were `var(--green)` / `var(--warn)` — self-referential, so they
      resolved to invalid and every site fell back to its own literal
      (or, for sites with no fallback, painted as transparent/inherit).
@@ -30,16 +30,16 @@
   --warn: #f0ad4e;
 
   /* Syntax highlighting */
-  --hl-bg: #1e2228;
-  --hl-fg: #9cdef2;
-  --hl-keyword: #c678dd;
-  --hl-string: #e5c07b;
-  --hl-comment: #828997;
-  --hl-function: #61afef;
-  --hl-number: #d19a66;
-  --hl-builtin: #56b6c2;
-  --hl-variable: #abb2bf;
-  --hl-params: #a8c0d4;
+  --hl-bg: #141414;
+  --hl-fg: #E8E8E8;
+  --hl-keyword: #D65A5D;
+  --hl-string: #D6B36E;
+  --hl-comment: #6B6B6B;
+  --hl-function: #6FA8E8;
+  --hl-number: #D68A5A;
+  --hl-builtin: #5EADB8;
+  --hl-variable: #B8B8B8;
+  --hl-params: #9E9E9E;
 
   /* Semantic colors */
   --color-error: #ff4444;
@@ -69,25 +69,26 @@
 }
 
 :root.light {
-  --bg: #f5f5f5;
-  --fg: #2b2b2b;
-  --panel: #fff;
-  --border: #bbb;
-  --hl-bg: #f9f9f9;
-  --hl-fg: #2b2b2b;
-  --hl-keyword: #7928a1;
-  --hl-string: #986801;
-  --hl-comment: #6a737d;
+  --bg: #FAFAFA;
+  --fg: #1A1A1A;
+  --panel: #FFFFFF;
+  --border: #E5E5E5;
+  --red: #C61A1D;
+  --hl-bg: #F4F4F4;
+  --hl-fg: #1A1A1A;
+  --hl-keyword: #8A1E8F;
+  --hl-string: #8A6200;
+  --hl-comment: #6B6B6B;
   --hl-function: #005cc5;
-  --hl-number: #986801;
-  --hl-builtin: #0070a0;
-  --hl-variable: #383a42;
-  --hl-params: #4a4f5c;
-  --select-bg: #eaeaea;
+  --hl-number: #8A4A10;
+  --hl-builtin: #006B85;
+  --hl-variable: #333333;
+  --hl-params: #4A4A4A;
+  --select-bg: #F0F0F0;
   --select-fg: var(--fg);
   --select-option-bg: var(--panel);
   --select-option-fg: var(--fg);
-  --select-option-active-bg: color-mix(in srgb, var(--red) 16%, var(--panel));
+  --select-option-active-bg: color-mix(in srgb, var(--red) 12%, var(--panel));
 }
 
 /* ── Reset & Base ── */
@@ -21546,7 +21547,7 @@ body.gallery-selecting .gallery-dl-btn,
 
 /* Welcome name — left-to-right wipe with a touch of horizontal stretch.
    Fires on initial render via the .welcome-name rule; restarts on Nobody⇄
-   Odysseus toggle via JS reflow trick. */
+    toggle via JS reflow trick. */
 .welcome-name {
   transform-origin: left center;
   animation: welcome-name-reveal 0.55s cubic-bezier(0.34, 1.32, 0.55, 1) both;
