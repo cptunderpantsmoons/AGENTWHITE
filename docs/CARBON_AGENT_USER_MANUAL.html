@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CarbonAgent User Manual</title>
+<style>
+:root { --red:#c61a1d; --ink:#171717; --muted:#666; --line:#ddd; --bg:#fff; --soft:#f7f7f7; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; line-height:1.55; }
+.manual { max-width: 980px; margin: 0 auto; padding: 42px 42px 70px; }
+h1 { font-size: 2.35rem; color: var(--red); margin: 0 0 0.4rem; letter-spacing: -0.03em; }
+h2 { break-before: page; margin-top: 2.2rem; padding-top: 0.7rem; border-top: 2px solid var(--red); color: #222; font-size: 1.55rem; }
+h2:first-of-type { break-before: auto; }
+h3 { color:#333; margin-top:1.4rem; }
+p { margin: 0.55rem 0 0.8rem; }
+ul, ol { margin-top:0.4rem; padding-left:1.45rem; }
+li { margin:0.22rem 0; }
+hr { border:none; border-top:1px solid var(--line); margin:1.4rem 0; }
+code { background:#f0eeee; color:#9a1114; padding:0.12rem 0.28rem; border-radius:4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.92em; }
+figure { margin: 1.05rem 0 1.4rem; padding: 10px; background: var(--soft); border:1px solid var(--line); border-radius:12px; break-inside: avoid; }
+img { display:block; width:100%; height:auto; border-radius:8px; border:1px solid #e4e4e4; }
+figcaption { color:var(--muted); font-size:0.86rem; margin-top:0.45rem; text-align:center; }
+table { width:100%; border-collapse:collapse; margin:1rem 0; font-size:0.92rem; }
+th, td { border:1px solid var(--line); padding:0.45rem 0.55rem; text-align:left; vertical-align:top; }
+th { background:#f4eeee; color:#8d1417; }
+.cover-note { border-left: 4px solid var(--red); padding: 0.8rem 1rem; background:#fff7f7; margin:1rem 0 1.4rem; }
+@media print {
+  body { font-size: 11.5pt; }
+  .manual { max-width: none; padding: 20mm 16mm; }
+  h1 { font-size: 24pt; }
+  h2 { font-size: 16pt; }
+  figure { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<main class="manual">
+<h1>CarbonAgent User Manual</h1>
+<p><strong>Version:</strong> 1.1 updated project manual</p>
+<p><strong>App URL used for capture:</strong> <code>http://127.0.0.1:7000/</code></p>
+<p><strong>Updated:</strong> 2026-06-18</p>
+<p>CarbonAgent is a local-first AI workspace for chat, agent workflows, model management, memory, documents, research, email, calendar, notes, and task automation.</p>
+<p>This manual is based on live screenshots captured from the local application. Some screenshots may show the current local configuration, existing conversations, or connected model endpoints.</p>
+<hr>
+<h2>1. Main chat workspace</h2>
+<figure><img src="user-manual-assets/01-chat-workspace.png" alt="Default chat workspace"><figcaption>Default chat workspace</figcaption></figure>
+<p>The main workspace is the center of CarbonAgent. It combines conversation history, model selection, agent/chat mode, and tool toggles.</p>
+<h3>Key areas</h3>
+<ul>
+<li><strong>Sidebar:</strong> Navigation for chats, email, tools, Brain, Calendar, Compare, Cookbook, Deep Research, Gallery, Library, Notes, Tasks, and Theme.</li>
+<li><strong>Conversation area:</strong> Displays prior messages and generated responses.</li>
+<li><strong>Composer:</strong> The message input at the bottom.</li>
+<li><strong>Model selector:</strong> Selects the active model endpoint.</li>
+<li><strong>Agent / Chat toggle:</strong> Switches between tool-using agent mode and regular chat mode.</li>
+<li><strong>Tool controls:</strong> Enables web, shell, plan, file, document, RAG, workspace, and prompt-related workflows.</li>
+</ul>
+<hr>
+<h2>2. Model picker</h2>
+<figure><img src="user-manual-assets/02-model-picker.png" alt="Model picker"><figcaption>Model picker</figcaption></figure>
+<p>Use the model picker to select which configured model handles the current request.</p>
+<h3>Common actions</h3>
+<ul>
+<li>Search configured models.</li>
+<li>Switch between local/API endpoints.</li>
+<li>Confirm the active model before sending.</li>
+<li>Open model configuration if more endpoints are needed.</li>
+</ul>
+<hr>
+<h2>3. Agent tools and mode controls</h2>
+<figure><img src="user-manual-assets/03-agent-tools.png" alt="Agent and chat tools"><figcaption>Agent and chat tools</figcaption></figure>
+<p>CarbonAgent can operate as a simple chat assistant or as a tool-using agent.</p>
+<h3>Tool toggles</h3>
+<ul>
+<li><strong>Web search:</strong> Allows source lookup and online research.</li>
+<li><strong>Shell access:</strong> Allows local command execution.</li>
+<li><strong>Plan mode:</strong> Makes the agent inspect and propose before acting.</li>
+<li><strong>Agent mode:</strong> Enables tool use and multi-step task execution.</li>
+<li><strong>Chat mode:</strong> Keeps responses conversational and less autonomous.</li>
+</ul>
+<p>Use shell access only when a task actually needs local commands. Safety first, chaos later.</p>
+<hr>
+<h2>4. Overflow tools</h2>
+<figure><img src="user-manual-assets/04-overflow-tools.png" alt="Overflow tools"><figcaption>Overflow tools</figcaption></figure>
+<p>The overflow menu exposes additional context and workflow tools.</p>
+<h3>Available tools</h3>
+<ul>
+<li>Attach files.</li>
+<li>Open Documents.</li>
+<li>Enable RAG.</li>
+<li>Attach a workspace folder.</li>
+<li>Open Prompt controls.</li>
+</ul>
+<hr>
+<h2>5. Prompt injection controls</h2>
+<figure><img src="user-manual-assets/05-prompt-inject.png" alt="Prompt inject controls"><figcaption>Prompt inject controls</figcaption></figure>
+<p>Prompt controls let you apply reusable instructions around a message.</p>
+<h3>Uses</h3>
+<ul>
+<li>Add a prefix or suffix to prompts.</li>
+<li>Tune generation settings such as temperature and max tokens.</li>
+<li>Keep recurring instruction patterns reusable.</li>
+</ul>
+<hr>
+<h2>6. Personas</h2>
+<figure><img src="user-manual-assets/06-persona.png" alt="Persona controls"><figcaption>Persona controls</figcaption></figure>
+<p>Personas are reusable assistant roles with their own name and system prompt.</p>
+<h3>Good persona examples</h3>
+<ul>
+<li>Code reviewer.</li>
+<li>Product manager.</li>
+<li>Security reviewer.</li>
+<li>Technical writer.</li>
+<li>Financial analyst.</li>
+</ul>
+<p>Keep persona prompts focused. A giant prompt blob is not a personality; it is a haunted sandwich.</p>
+<hr>
+<h2>7. Group chat</h2>
+<figure><img src="user-manual-assets/07-group-chat.png" alt="Group chat controls"><figcaption>Group chat controls</figcaption></figure>
+<p>Group chat mode lets multiple personas participate in a task.</p>
+<h3>Use cases</h3>
+<ul>
+<li>Brainstorming.</li>
+<li>Multi-perspective review.</li>
+<li>Simulated stakeholder feedback.</li>
+<li>Comparing solution strategies.</li>
+</ul>
+<hr>
+<h2>8. Conversation search</h2>
+<figure><img src="user-manual-assets/08-conversation-search.png" alt="Conversation search"><figcaption>Conversation search</figcaption></figure>
+<p>Conversation search helps find prior chats and resume earlier work.</p>
+<h3>Tips</h3>
+<ul>
+<li>Search by topic, model output, or task name.</li>
+<li>Use it before duplicating old work.</li>
+<li>Keep useful sessions named clearly.</li>
+</ul>
+<hr>
+<h2>9. Brain: memories</h2>
+<figure><img src="user-manual-assets/09-brain-memory.png" alt="Brain memories"><figcaption>Brain memories</figcaption></figure>
+<p>Brain stores durable memories that CarbonAgent can use across sessions.</p>
+<h3>Memory actions</h3>
+<ul>
+<li>Search memories.</li>
+<li>Filter by category.</li>
+<li>Add new memories.</li>
+<li>Edit or delete stale memories.</li>
+<li>Import/export memories.</li>
+<li>Tidy or deduplicate entries.</li>
+</ul>
+<p>Save long-term facts and preferences, not random trivia confetti.</p>
+<hr>
+<h2>10. Brain: skills</h2>
+<figure><img src="user-manual-assets/10-brain-skills.png" alt="Brain skills"><figcaption>Brain skills</figcaption></figure>
+<p>Skills are reusable procedures for recurring workflows.</p>
+<h3>Skill actions</h3>
+<ul>
+<li>Search skills.</li>
+<li>Add or import skills.</li>
+<li>Test and audit skills.</li>
+<li>Approve, publish, edit, or delete skills.</li>
+</ul>
+<p>Skills are best for repeatable processes, such as code review steps, analysis checklists, or documentation rules.</p>
+<hr>
+<h2>11. Add memories and skills</h2>
+<figure><img src="user-manual-assets/11-brain-add.png" alt="Add memory or skill"><figcaption>Add memory or skill</figcaption></figure>
+<p>Use the Add tab to create new memories or skills.</p>
+<h3>Good memory examples</h3>
+<ul>
+<li>“Prefer concise status updates.”</li>
+<li>“This project uses FastAPI and local-first storage.”</li>
+<li>“Keep frontend changes opt-in until stable.”</li>
+</ul>
+<h3>Good skill examples</h3>
+<ul>
+<li>“Before editing code, inspect structure and read existing files.”</li>
+<li>“For variance analysis, compare actuals, budget, and prior period.”</li>
+</ul>
+<hr>
+<h2>12. Calendar</h2>
+<figure><img src="user-manual-assets/12-calendar.png" alt="Calendar"><figcaption>Calendar</figcaption></figure>
+<p>Calendar supports scheduling and calendar workflows.</p>
+<h3>Uses</h3>
+<ul>
+<li>View events.</li>
+<li>Add calendar entries.</li>
+<li>Coordinate reminders.</li>
+<li>Sync with configured calendar providers where supported.</li>
+</ul>
+<hr>
+<h2>13. Compare</h2>
+<figure><img src="user-manual-assets/13-compare.png" alt="Compare"><figcaption>Compare</figcaption></figure>
+<p>Compare mode tests multiple models side by side.</p>
+<h3>Suggested workflow</h3>
+<ol>
+<li>Enter a prompt.</li>
+<li>Choose models.</li>
+<li>Run the comparison.</li>
+<li>Review outputs for quality, speed, style, and accuracy.</li>
+<li>Pick the best model for the task.</li>
+</ol>
+<hr>
+<h2>14. Cookbook: Download</h2>
+<figure><img src="user-manual-assets/14-cookbook-download.png" alt="Cookbook download"><figcaption>Cookbook download</figcaption></figure>
+<p>Cookbook helps discover, download, and serve local models.</p>
+<h3>Download tab</h3>
+<ul>
+<li>Download models from Hugging Face or model identifiers.</li>
+<li>Scan local hardware.</li>
+<li>Filter by engine, quantization, context length, and server target.</li>
+<li>Find models that fit available hardware.</li>
+</ul>
+<hr>
+<h2>15. Cookbook: Serve</h2>
+<figure><img src="user-manual-assets/15-cookbook-serve.png" alt="Cookbook serve"><figcaption>Cookbook serve</figcaption></figure>
+<p>The Serve tab manages local model serving.</p>
+<h3>Uses</h3>
+<ul>
+<li>Start model servers.</li>
+<li>Monitor running models.</li>
+<li>Manage serve backends.</li>
+<li>Connect served models to the chat model picker.</li>
+</ul>
+<hr>
+<h2>16. Cookbook: Dependencies</h2>
+<figure><img src="user-manual-assets/16-cookbook-dependencies.png" alt="Cookbook dependencies"><figcaption>Cookbook dependencies</figcaption></figure>
+<p>The Dependencies tab checks required local tooling for model serving.</p>
+<h3>Uses</h3>
+<ul>
+<li>Validate runtime dependencies.</li>
+<li>Identify missing tools.</li>
+<li>Prepare model-serving backends.</li>
+</ul>
+<hr>
+<h2>17. Cookbook: Settings</h2>
+<figure><img src="user-manual-assets/17-cookbook-settings.png" alt="Cookbook settings"><figcaption>Cookbook settings</figcaption></figure>
+<p>Cookbook settings configure download credentials and local/remote servers.</p>
+<h3>Settings include</h3>
+<ul>
+<li>Hugging Face token.</li>
+<li>SSH/local server configuration.</li>
+<li>Python virtual environment path.</li>
+<li>Model directory locations.</li>
+<li>Default server selection.</li>
+</ul>
+<hr>
+<h2>18. Deep Research</h2>
+<figure><img src="user-manual-assets/18-deep-research.png" alt="Deep Research"><figcaption>Deep Research</figcaption></figure>
+<p>Deep Research runs multi-step research workflows and produces synthesized output.</p>
+<h3>Best for</h3>
+<ul>
+<li>Technical investigation.</li>
+<li>Market research.</li>
+<li>Literature/source review.</li>
+<li>Competitive analysis.</li>
+<li>Decision briefs.</li>
+</ul>
+<hr>
+<h2>19. Gallery</h2>
+<figure><img src="user-manual-assets/19-gallery.png" alt="Gallery"><figcaption>Gallery</figcaption></figure>
+<p>Gallery manages visual assets and image-related workflows.</p>
+<h3>Uses</h3>
+<ul>
+<li>Review generated or uploaded images.</li>
+<li>Organize visual outputs.</li>
+<li>Reuse images in documents or other workflows.</li>
+</ul>
+<hr>
+<h2>20. Library and documents</h2>
+<figure><img src="user-manual-assets/20-library-documents.png" alt="Library documents"><figcaption>Library documents</figcaption></figure>
+<p>Library stores documents and writing artifacts.</p>
+<h3>Uses</h3>
+<ul>
+<li>Create documents.</li>
+<li>Save chat output.</li>
+<li>Edit drafts.</li>
+<li>Maintain reports, notes, and reusable written material.</li>
+</ul>
+<hr>
+<h2>21. Notes</h2>
+<figure><img src="user-manual-assets/21-notes.png" alt="Notes"><figcaption>Notes</figcaption></figure>
+<p>Notes are quick-capture items for lightweight information.</p>
+<h3>Uses</h3>
+<ul>
+<li>Personal notes.</li>
+<li>Scratchpads.</li>
+<li>Checklists.</li>
+<li>Quick reminders.</li>
+</ul>
+<hr>
+<h2>22. Tasks</h2>
+<figure><img src="user-manual-assets/22-tasks.png" alt="Tasks"><figcaption>Tasks</figcaption></figure>
+<p>Tasks track todo items, reminders, and scheduled actions.</p>
+<h3>Uses</h3>
+<ul>
+<li>Manage follow-ups.</li>
+<li>Track recurring work.</li>
+<li>Coordinate with notes and calendar items.</li>
+</ul>
+<hr>
+<h2>23. Theme browser</h2>
+<figure><img src="user-manual-assets/23-theme-browse.png" alt="Theme browser"><figcaption>Theme browser</figcaption></figure>
+<p>The Theme browser controls the visual style of CarbonAgent.</p>
+<h3>Actions</h3>
+<ul>
+<li>Browse saved themes.</li>
+<li>Apply a theme.</li>
+<li>Import/export theme JSON.</li>
+<li>Reset the theme.</li>
+</ul>
+<hr>
+<h2>24. Theme customization</h2>
+<figure><img src="user-manual-assets/24-theme-customize.png" alt="Theme customization"><figcaption>Theme customization</figcaption></figure>
+<p>Theme customization exposes granular color controls.</p>
+<h3>Customizable areas</h3>
+<ul>
+<li>Background and foreground colors.</li>
+<li>Panel and border colors.</li>
+<li>Sidebar colors.</li>
+<li>Chat bubble colors.</li>
+<li>Input and send button colors.</li>
+<li>Accent colors.</li>
+</ul>
+<hr>
+<h2>25. Settings: Add Models</h2>
+<figure><img src="user-manual-assets/25-settings-add-models.png" alt="Settings add models"><figcaption>Settings add models</figcaption></figure>
+<p>Settings control app-wide configuration. The Add Models tab connects local and API endpoints.</p>
+<h3>Model endpoint options</h3>
+<ul>
+<li>Local model servers.</li>
+<li>API model providers.</li>
+<li>Existing endpoint management.</li>
+<li>Enable/disable/delete configured endpoints.</li>
+</ul>
+<hr>
+<h2>26. Settings: AI Defaults</h2>
+<figure><img src="user-manual-assets/26-settings-ai-defaults.png" alt="Settings AI defaults"><figcaption>Settings AI defaults</figcaption></figure>
+<p>AI Defaults configure baseline model behavior.</p>
+<h3>Typical settings</h3>
+<ul>
+<li>Default model choices.</li>
+<li>Response behavior.</li>
+<li>Agent/chat defaults.</li>
+</ul>
+<hr>
+<h2>27. Settings: Search</h2>
+<figure><img src="user-manual-assets/27-settings-search.png" alt="Settings search"><figcaption>Settings search</figcaption></figure>
+<p>Search settings configure web/search behavior and providers.</p>
+<hr>
+<h2>28. Settings: Integrations</h2>
+<figure><img src="user-manual-assets/28-settings-integrations.png" alt="Settings integrations"><figcaption>Settings integrations</figcaption></figure>
+<p>Integrations connect external services used by the app and agent workflows.</p>
+<hr>
+<h2>29. Settings: Email</h2>
+<figure><img src="user-manual-assets/29-settings-email.png" alt="Settings email"><figcaption>Settings email</figcaption></figure>
+<p>Email settings configure mail accounts and related behavior.</p>
+<hr>
+<h2>30. Settings: Appearance</h2>
+<figure><img src="user-manual-assets/30-settings-appearance.png" alt="Settings appearance"><figcaption>Settings appearance</figcaption></figure>
+<p>Appearance settings control UI preferences such as layout, density, and visual behavior.</p>
+<hr>
+<h2>31. Settings: Shortcuts</h2>
+<figure><img src="user-manual-assets/31-settings-shortcuts.png" alt="Settings shortcuts"><figcaption>Settings shortcuts</figcaption></figure>
+<p>Shortcuts lists keyboard commands for faster navigation and operation.</p>
+<hr>
+<h2>32. Settings: Account</h2>
+<figure><img src="user-manual-assets/32-settings-account.png" alt="Settings account"><figcaption>Settings account</figcaption></figure>
+<p>Account settings manage user/account-level options.</p>
+<hr>
+<h2>33. Email</h2>
+<figure><img src="user-manual-assets/33-email.png" alt="Email"><figcaption>Email</figcaption></figure>
+<p>Email supports inbox and AI-assisted mail workflows when configured.</p>
+<h3>Common capabilities</h3>
+<ul>
+<li>View inboxes.</li>
+<li>Summarize messages.</li>
+<li>Draft replies.</li>
+<li>Triage and tag email.</li>
+</ul>
+<hr>
+<h2>34. Alternate layout mode</h2>
+<figure><img src="user-manual-assets/34-layout-mode-workspace.png" alt="Alternate layout workspace"><figcaption>Alternate layout workspace</figcaption></figure>
+<p>CarbonAgent includes an opt-in alternate layout mode for a more polished command-workspace feel.</p>
+<h3>Enable alternate layout</h3>
+<p>Open:</p>
+<p>```text</p>
+<p>http://127.0.0.1:7000/?harness=1</p>
+<p>```</p>
+<h3>Disable alternate layout</h3>
+<p>Open:</p>
+<p>```text</p>
+<p>http://127.0.0.1:7000/?harness=0</p>
+<p>```</p>
+<p>Or click the <strong>Layout ON</strong> pill in the bottom-right corner.</p>
+<h3>Notes</h3>
+<ul>
+<li>This mode is opt-in.</li>
+<li>The default layout remains unchanged.</li>
+<li>The setting persists in local browser storage until disabled.</li>
+</ul>
+<hr>
+<h2>35. Alternate layout command deck</h2>
+<figure><img src="user-manual-assets/35-layout-mode-command-deck.png" alt="Alternate layout command deck"><figcaption>Alternate layout command deck</figcaption></figure>
+<p>The alternate layout emphasizes the composer as a command deck.</p>
+<h3>Visible elements</h3>
+<ul>
+<li>Command deck label.</li>
+<li>Model indicator.</li>
+<li>Agent/chat toggle.</li>
+<li>Tool controls.</li>
+<li>Status chips for mode, model, and active tools.</li>
+</ul>
+<hr>
+<h2>36. Alternate layout with Cookbook</h2>
+<figure><img src="user-manual-assets/36-layout-mode-cookbook.png" alt="Alternate layout Cookbook"><figcaption>Alternate layout Cookbook</figcaption></figure>
+<p>The alternate layout preserves all existing features and modals, including Cookbook.</p>
+<hr>
+<h2>37. Alternate layout with Settings</h2>
+<figure><img src="user-manual-assets/37-layout-mode-settings.png" alt="Alternate layout Settings"><figcaption>Alternate layout Settings</figcaption></figure>
+<p>Settings remain available in alternate layout mode.</p>
+<hr>
+<h2>38. Mobile workspace</h2>
+<figure><img src="user-manual-assets/38-mobile-workspace.png" alt="Mobile workspace"><figcaption>Mobile workspace</figcaption></figure>
+<p>CarbonAgent is responsive and supports mobile-sized screens.</p>
+<h3>Mobile notes</h3>
+<ul>
+<li>The conversation remains readable.</li>
+<li>The composer adapts to narrow screens.</li>
+<li>Navigation uses mobile controls where available.</li>
+</ul>
+<hr>
+<h2>39. Mobile chat and composer</h2>
+<figure><img src="user-manual-assets/39-mobile-navigation.png" alt="Mobile chat and composer"><figcaption>Mobile chat and composer</figcaption></figure>
+<p>This screenshot shows the mobile chat area and composer controls at phone width.</p>
+<hr>
+<h2>Practical workflows</h2>
+<h3>Configure a model</h3>
+<ol>
+<li>Open <strong>Settings</strong>.</li>
+<li>Go to <strong>Add Models</strong>.</li>
+<li>Add a local or API endpoint.</li>
+<li>Confirm the model appears in the model picker.</li>
+<li>Select it before chatting.</li>
+</ol>
+<h3>Run an agent task against local files</h3>
+<ol>
+<li>Attach a workspace folder if needed.</li>
+<li>Enable <strong>Agent</strong> mode.</li>
+<li>Enable <strong>Shell access</strong> only if commands are required.</li>
+<li>Use <strong>Plan mode</strong> for safer multi-step work.</li>
+<li>Send a specific instruction.</li>
+</ol>
+<h3>Compare models</h3>
+<ol>
+<li>Open <strong>Compare</strong>.</li>
+<li>Select models.</li>
+<li>Enter a test prompt.</li>
+<li>Run the comparison.</li>
+<li>Pick the best model for the task.</li>
+</ol>
+<h3>Save reusable context</h3>
+<ol>
+<li>Open <strong>Brain</strong>.</li>
+<li>Add durable facts as memories.</li>
+<li>Add repeatable procedures as skills.</li>
+<li>Tidy/delete stale entries periodically.</li>
+</ol>
+<h3>Download and serve local models</h3>
+<ol>
+<li>Open <strong>Cookbook</strong>.</li>
+<li>Use hardware scan/download recommendations.</li>
+<li>Download a compatible model.</li>
+<li>Serve the model.</li>
+<li>Select it from the model picker.</li>
+</ol>
+<hr>
+<h2>Safety and maintenance notes</h2>
+<ul>
+<li>Use <strong>Chat</strong> mode for conversation.</li>
+<li>Use <strong>Agent</strong> mode for tool-using workflows.</li>
+<li>Enable <strong>Shell access</strong> only when local command execution is required.</li>
+<li>Use <strong>Plan mode</strong> before risky changes.</li>
+<li>Keep memories and skills clean and specific.</li>
+<li>Disable unused integrations or model endpoints.</li>
+<li>Prefer focused tasks over giant “do everything” prompts.</li>
+</ul>
+<hr>
+<h2>Screenshot inventory</h2>
+<table>
+<thead><tr>
+<th>#</th>
+<th>Screenshot</th>
+<th>Feature</th>
+</tr></thead><tbody>
+<tr>
+<td>1</td>
+<td><code>01-chat-workspace.png</code></td>
+<td>Default chat workspace</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>02-model-picker.png</code></td>
+<td>Model picker</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>03-agent-tools.png</code></td>
+<td>Agent/chat tools</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>04-overflow-tools.png</code></td>
+<td>Overflow tools</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>05-prompt-inject.png</code></td>
+<td>Prompt injection</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>06-persona.png</code></td>
+<td>Persona controls</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>07-group-chat.png</code></td>
+<td>Group chat</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>08-conversation-search.png</code></td>
+<td>Conversation search</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>09-brain-memory.png</code></td>
+<td>Brain memories</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>10-brain-skills.png</code></td>
+<td>Brain skills</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>11-brain-add.png</code></td>
+<td>Add memory/skill</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>12-calendar.png</code></td>
+<td>Calendar</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>13-compare.png</code></td>
+<td>Compare</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>14-cookbook-download.png</code></td>
+<td>Cookbook download</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>15-cookbook-serve.png</code></td>
+<td>Cookbook serve</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>16-cookbook-dependencies.png</code></td>
+<td>Cookbook dependencies</td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>17-cookbook-settings.png</code></td>
+<td>Cookbook settings</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>18-deep-research.png</code></td>
+<td>Deep Research</td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>19-gallery.png</code></td>
+<td>Gallery</td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>20-library-documents.png</code></td>
+<td>Library/Documents</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>21-notes.png</code></td>
+<td>Notes</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>22-tasks.png</code></td>
+<td>Tasks</td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>23-theme-browse.png</code></td>
+<td>Theme browser</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>24-theme-customize.png</code></td>
+<td>Theme customization</td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>25-settings-add-models.png</code></td>
+<td>Settings: Add Models</td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>26-settings-ai-defaults.png</code></td>
+<td>Settings: AI Defaults</td>
+</tr>
+<tr>
+<td>27</td>
+<td><code>27-settings-search.png</code></td>
+<td>Settings: Search</td>
+</tr>
+<tr>
+<td>28</td>
+<td><code>28-settings-integrations.png</code></td>
+<td>Settings: Integrations</td>
+</tr>
+<tr>
+<td>29</td>
+<td><code>29-settings-email.png</code></td>
+<td>Settings: Email</td>
+</tr>
+<tr>
+<td>30</td>
+<td><code>30-settings-appearance.png</code></td>
+<td>Settings: Appearance</td>
+</tr>
+<tr>
+<td>31</td>
+<td><code>31-settings-shortcuts.png</code></td>
+<td>Settings: Shortcuts</td>
+</tr>
+<tr>
+<td>32</td>
+<td><code>32-settings-account.png</code></td>
+<td>Settings: Account</td>
+</tr>
+<tr>
+<td>33</td>
+<td><code>33-email.png</code></td>
+<td>Email</td>
+</tr>
+<tr>
+<td>34</td>
+<td><code>34-layout-mode-workspace.png</code></td>
+<td>Alternate layout workspace</td>
+</tr>
+<tr>
+<td>35</td>
+<td><code>35-layout-mode-command-deck.png</code></td>
+<td>Alternate layout command deck</td>
+</tr>
+<tr>
+<td>36</td>
+<td><code>36-layout-mode-cookbook.png</code></td>
+<td>Alternate layout Cookbook</td>
+</tr>
+<tr>
+<td>37</td>
+<td><code>37-layout-mode-settings.png</code></td>
+<td>Alternate layout Settings</td>
+</tr>
+<tr>
+<td>38</td>
+<td><code>38-mobile-workspace.png</code></td>
+<td>Mobile workspace</td>
+</tr>
+<tr>
+<td>39</td>
+<td><code>39-mobile-navigation.png</code></td>
+<td>Mobile chat/composer</td>
+</tr>
+</tbody></table>
+</main>
+</body>
+</html>

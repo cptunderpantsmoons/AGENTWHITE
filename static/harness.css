@@ -1,0 +1,587 @@
+/* Carbon Command Harness
+   Next-generation layout skin for CarbonAgent.
+   Keeps existing IDs/features intact; only changes presentation. */
+
+:root {
+  --harness-red: var(--red, #c61a1d);
+  --harness-bg: var(--bg, #f6f5f2);
+  --harness-fg: var(--fg, #141414);
+  --harness-panel: color-mix(in srgb, var(--panel, #ffffff) 88%, transparent);
+  --harness-line: color-mix(in srgb, var(--fg, #111) 12%, transparent);
+  --harness-line-strong: color-mix(in srgb, var(--harness-red) 34%, var(--harness-line));
+  --harness-shadow: 0 22px 70px rgba(0, 0, 0, 0.16);
+  --harness-soft-shadow: 0 10px 28px rgba(0, 0, 0, 0.10);
+  --harness-radius: 24px;
+  --harness-rail: 56px;
+}
+
+html {
+  background:
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--harness-red) 10%, transparent), transparent 28rem),
+    radial-gradient(circle at 78% 4%, color-mix(in srgb, var(--fg) 8%, transparent), transparent 30rem),
+    linear-gradient(135deg, color-mix(in srgb, var(--bg) 90%, #fff), var(--bg));
+}
+
+body {
+  background:
+    linear-gradient(color-mix(in srgb, var(--fg) 2.4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--fg) 2.4%, transparent) 1px, transparent 1px),
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--harness-red) 5%, transparent), transparent 34rem);
+  background-size: 48px 48px, 48px 48px, auto;
+  color: var(--harness-fg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+  font-kerning: normal;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::before {
+  inset: 0;
+  opacity: 0.42;
+  background-image:
+    linear-gradient(115deg, transparent 0 18%, color-mix(in srgb, var(--harness-red) 7%, transparent) 18.2% 18.6%, transparent 18.8% 100%),
+    radial-gradient(circle at 88% 76%, color-mix(in srgb, var(--harness-red) 12%, transparent), transparent 18rem);
+}
+
+body::after {
+  inset: 0;
+  opacity: 0.16;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0, 0, 0, 0.08) 4px);
+  mix-blend-mode: multiply;
+}
+
+/* Left mission panel */
+.sidebar {
+  width: clamp(248px, 18vw, 288px) !important;
+  min-height: calc(100vh - 28px);
+  margin: 14px 0 14px 14px;
+  border: 1px solid var(--harness-line);
+  border-radius: 26px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, transparent), color-mix(in srgb, var(--bg) 86%, transparent)),
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--harness-red) 10%, transparent), transparent 14rem);
+  box-shadow: var(--harness-soft-shadow);
+  backdrop-filter: blur(22px) saturate(1.08);
+  z-index: 4;
+}
+
+.sidebar.hidden {
+  width: 0 !important;
+  margin-left: 0;
+}
+
+.sidebar-header {
+  min-height: 48px;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--harness-line);
+  background: transparent;
+}
+
+.sidebar-brand {
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-brand-title::before {
+  content: "";
+  display: none;
+}
+
+.sidebar-brand-title::after {
+  content: "";
+  display: none;
+}
+
+.sidebar-inner {
+  padding: 12px 10px 8px;
+}
+
+.section-header-flex {
+  margin: 14px 2px 6px;
+  padding: 0 4px;
+}
+
+.section-title,
+.settings-sidebar-label {
+  color: color-mix(in srgb, var(--fg) 52%, transparent);
+  font-size: 9px !important;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.list-item,
+.models-row,
+.settings-nav-item {
+  min-height: 36px;
+  margin: 4px 0;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.list-item:hover,
+.models-row:hover,
+.settings-nav-item:hover {
+  transform: translateX(3px);
+  background: color-mix(in srgb, var(--harness-red) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--harness-red) 22%, transparent);
+  box-shadow: inset 3px 0 0 var(--harness-red);
+}
+
+.list-item.active,
+.list-item.active-session,
+.settings-nav-item.active {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--harness-red) 16%, transparent), color-mix(in srgb, var(--panel) 90%, transparent));
+  border-color: color-mix(in srgb, var(--harness-red) 36%, transparent);
+  box-shadow: inset 3px 0 0 var(--harness-red), 0 8px 22px color-mix(in srgb, var(--harness-red) 12%, transparent);
+}
+
+.sidebar-user-bar {
+  margin: 8px 10px 10px;
+  padding: 10px;
+  border: 1px solid var(--harness-line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 78%, transparent);
+}
+
+.user-bar-avatar {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--harness-red) 10%, transparent);
+}
+
+/* Hardware control strip */
+.icon-rail {
+  width: var(--harness-rail);
+  margin: 12px 0 12px 12px;
+  border: 1px solid var(--harness-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  box-shadow: var(--harness-soft-shadow);
+  backdrop-filter: blur(20px);
+  z-index: 5;
+}
+
+.icon-rail-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  color: color-mix(in srgb, var(--fg) 72%, transparent);
+}
+
+.icon-rail-btn:hover,
+.icon-rail-btn.active-section {
+  color: var(--harness-red);
+  background: color-mix(in srgb, var(--harness-red) 12%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--harness-red) 28%, transparent), 0 8px 22px color-mix(in srgb, var(--harness-red) 16%, transparent);
+}
+
+/* Central cockpit */
+.chat-container {
+  position: relative;
+  z-index: 1;
+  margin: 14px 18px 14px 18px;
+  border: 1px solid var(--harness-line);
+  border-radius: 30px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 78%, transparent), color-mix(in srgb, var(--bg) 62%, transparent)),
+    radial-gradient(circle at 50% -10%, color-mix(in srgb, var(--harness-red) 7%, transparent), transparent 20rem);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.13);
+  overflow: hidden;
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.chat-container::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid color-mix(in srgb, var(--fg) 5.5%, transparent);
+  border-radius: 22px;
+  pointer-events: none;
+}
+
+.chat-top-bar {
+  height: 48px;
+  border-bottom: 1px solid var(--harness-line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--panel) 72%, transparent), transparent);
+}
+
+.chat-meta-overlay {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 46%, transparent);
+}
+
+#chat-history {
+  max-width: min(920px, calc(100vw - 420px));
+  margin-inline: auto;
+  padding: 28px 26px 170px !important;
+}
+
+.message,
+.msg,
+.assistant-message,
+.user-message {
+  border-radius: 22px;
+}
+
+.message-content,
+.bubble,
+.assistant-bubble,
+.user-bubble {
+  border-radius: 22px !important;
+}
+
+.chat-input-bar {
+  left: 50% !important;
+  right: auto !important;
+  bottom: 20px !important;
+  width: min(820px, calc(100vw - 440px)) !important;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--harness-red) 20%, var(--harness-line));
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 92%, transparent), color-mix(in srgb, var(--bg) 84%, transparent)),
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--harness-red) 10%, transparent), transparent 12rem);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(22px) saturate(1.1);
+}
+
+.chat-input-bar::before {
+  content: "COMMAND DECK";
+  position: absolute;
+  top: -18px;
+  left: 24px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--harness-red);
+  color: white;
+  font-size: 9.5px;
+  font-weight: 850;
+  letter-spacing: 0.16em;
+}
+
+#message {
+  min-height: 56px !important;
+  padding: 17px 176px 10px 20px !important;
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: -0.006em;
+}
+
+.model-picker-btn,
+.input-icon-btn,
+.mode-toggle,
+.send-btn,
+.confirm-btn,
+.theme-io-btn,
+.model-chat-btn {
+  border-radius: 14px !important;
+}
+
+.send-btn {
+  min-width: 48px;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--harness-red) 24%, transparent);
+}
+
+.mode-toggle {
+  padding: 3px;
+  border: 1px solid var(--harness-line);
+  background: color-mix(in srgb, var(--panel) 66%, transparent);
+}
+
+.mode-toggle-btn.active {
+  background: var(--harness-red) !important;
+  color: white !important;
+}
+
+/* Floating windows become control surfaces */
+.modal-content,
+.settings-modal-content,
+.memory-modal-content,
+.theme-modal-content,
+.preset-modal-content {
+  border: 1px solid color-mix(in srgb, var(--harness-red) 18%, var(--harness-line)) !important;
+  border-radius: 24px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, transparent), color-mix(in srgb, var(--bg) 88%, transparent)) !important;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.24) !important;
+  backdrop-filter: blur(26px) saturate(1.1);
+  overflow: hidden;
+}
+
+.modal-header {
+  min-height: 54px;
+  border-bottom: 1px solid var(--harness-line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--harness-red) 9%, transparent), transparent);
+}
+
+.modal-header h4,
+.modal-header h2 {
+  color: var(--harness-red) !important;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+}
+
+.close-btn,
+.minimize-btn {
+  border-radius: 10px !important;
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent) !important;
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: var(--font-family, inherit);
+}
+
+input,
+textarea,
+select {
+  border-radius: 12px !important;
+}
+
+/* Harness status chips injected by harness.js */
+.harness-status-strip {
+  position: fixed;
+  top: 18px;
+  right: 24px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.harness-chip {
+  padding: 6px 10px;
+  border: 1px solid var(--harness-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 78%, transparent);
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.065);
+  color: color-mix(in srgb, var(--fg) 64%, transparent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  backdrop-filter: blur(18px);
+}
+
+.harness-chip strong {
+  color: var(--harness-red);
+}
+
+@media (max-width: 1100px) {
+  .chat-input-bar { width: min(760px, calc(100vw - 140px)) !important; }
+  #chat-history { max-width: calc(100vw - 120px); }
+  .harness-status-strip { display: none; }
+}
+
+@media (max-width: 768px) {
+  body { overflow: auto; }
+  .sidebar { margin: 0; border-radius: 0 24px 24px 0; min-height: 100vh; }
+  .chat-container { margin: 0; border-radius: 0; min-height: 100vh; }
+  .chat-input-bar { width: calc(100vw - 24px) !important; bottom: 12px !important; }
+  #chat-history { max-width: 100%; padding-bottom: 160px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Refinement pass: make the harness feel like an actual cockpit, not a polite skin. */
+.chat-container {
+  padding: 0 24px 24px !important;
+}
+
+.chat-container::after {
+  content: "ACTIVE WORKSPACE";
+  position: absolute;
+  top: 19px;
+  left: 30px;
+  z-index: 1;
+  color: color-mix(in srgb, var(--fg) 28%, transparent);
+  font-size: 8.5px;
+  font-weight: 850;
+  letter-spacing: 0.24em;
+  pointer-events: none;
+}
+
+.chat-top-bar {
+  margin: 0 -24px;
+  padding-inline: 220px;
+}
+
+.chat-history {
+  --chat-max: 860px;
+  position: relative;
+  z-index: 1;
+  margin: 0 auto 0 !important;
+  width: min(100%, 880px);
+  padding-top: 38px !important;
+  padding-bottom: 170px !important;
+}
+
+.chat-history::before {
+  content: "";
+  position: sticky;
+  top: 10px;
+  display: block;
+  height: 1px;
+  margin: 0 auto 16px;
+  width: min(92%, 820px);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--harness-red) 32%, transparent), transparent);
+  opacity: 0.55;
+}
+
+.chat-container .chat-input-bar,
+.chat-container.welcome-active .chat-input-bar {
+  position: absolute !important;
+  z-index: 6;
+  left: 50% !important;
+  right: auto !important;
+  bottom: 24px !important;
+  transform: translateX(-50%);
+  width: min(728px, calc(100% - 190px)) !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+.chat-input-bar {
+  padding: 13px 14px 12px !important;
+}
+
+.chat-input-bottom {
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.chat-input-left,
+.chat-input-right {
+  gap: 7px;
+}
+
+.input-icon-btn:hover,
+.model-picker-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 16px color-mix(in srgb, var(--harness-red) 13%, transparent);
+}
+
+.harness-status-strip {
+  top: 76px;
+  right: 36px;
+  flex-direction: column;
+  align-items: flex-end;
+  z-index: 2;
+}
+
+.harness-chip {
+  min-width: 148px;
+  text-align: right;
+  border-color: color-mix(in srgb, var(--harness-red) 16%, var(--harness-line));
+}
+
+.sidebar {
+  box-shadow: 18px 0 80px rgba(0, 0, 0, 0.10), var(--harness-soft-shadow);
+}
+
+.sidebar-inner::before {
+  content: "MISSION MODULES";
+  display: block;
+  margin: 3px 10px 14px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--harness-line);
+  color: color-mix(in srgb, var(--fg) 42%, transparent);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.255em;
+}
+
+.list-item {
+  padding-inline: 13px !important;
+  letter-spacing: 0.002em;
+}
+
+.list-item svg,
+.section-icon {
+  transition: transform 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.list-item:hover svg {
+  transform: scale(1.08) rotate(-2deg);
+  color: var(--harness-red);
+  opacity: 0.9 !important;
+}
+
+.modal:not(.hidden) .modal-content {
+  animation: harness-window-in 180ms cubic-bezier(.2,.75,.25,1) both;
+}
+
+@keyframes harness-window-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 1100px) {
+  .chat-container .chat-input-bar,
+  .chat-container.welcome-active .chat-input-bar {
+    width: min(760px, calc(100% - 36px)) !important;
+  }
+}
+
+#harness-exit-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9999;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--harness-red) 36%, var(--harness-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  color: var(--harness-red);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.11);
+  backdrop-filter: blur(18px);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+#harness-exit-pill:hover {
+  background: var(--harness-red);
+  color: white;
+}
+
+/* Premium alignment pass: crisp optical rhythm across rails, chips, and controls. */
+.harness-enabled :is(.list-item,.models-row,.settings-nav-item,.input-icon-btn,.model-picker-btn,.send-btn,.mode-toggle-btn,.harness-chip){-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision;}
+.harness-enabled .sidebar :is(.list-item,.models-row){display:flex;align-items:center;gap:10px;}
+.harness-enabled .sidebar :is(.list-item svg,.section-icon,.sidebar-action-icon){width:14px;height:14px;flex:0 0 14px;}
+.harness-enabled .chat-input-bottom{min-height:38px;align-items:center;}
+.harness-enabled :is(.input-icon-btn,.send-btn,.model-picker-btn){min-height:34px;}
+
+@font-face{font-family:'Harness Inter';font-weight:400;src:url('/static/fonts/Inter-Regular.woff2') format('woff2');font-display:swap;}
+@font-face{font-family:'Harness Inter';font-weight:500;src:url('/static/fonts/Inter-Medium.woff2') format('woff2');font-display:swap;}
+@font-face{font-family:'Harness Inter';font-weight:600 800;src:url('/static/fonts/Inter-SemiBold.woff2') format('woff2');font-display:swap;}
+.harness-enabled body,.harness-enabled :is(.sidebar,.chat-container,.modal-content,.settings-modal-content,.memory-modal-content,.theme-modal-content,.preset-modal-content,.chat-input-bar,button,input,textarea,select){font-family:'Harness Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;}
+.harness-enabled :is(pre,code,kbd,samp,.code-block,.hljs){font-family:'Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace!important;}
+.harness-enabled .chat-history{font-size:15.5px;line-height:1.55;font-weight:400;letter-spacing:-.012em;}
+.harness-enabled .chat-history :is(h1,h2,h3,strong,b){font-weight:700;letter-spacing:-.018em;}
+.harness-enabled .sidebar :is(.list-item,.models-row){font-size:12.25px;font-weight:500;line-height:1.2;}
+.harness-enabled :is(.section-title,.settings-sidebar-label,.sidebar-inner::before,.chat-container::after,.chat-meta-overlay,.harness-chip,#harness-exit-pill){font-family:'Harness Inter',sans-serif!important;}
+.harness-enabled .model-picker-btn{font-size:12px;font-weight:550;}
+.harness-enabled .mode-toggle-btn,.harness-enabled .send-btn{font-size:13px;font-weight:700;}
+.harness-enabled .chat-history :is(p,li){margin-block:.38em}.harness-enabled .chat-history .msg{font-size:15px;line-height:1.56}.harness-enabled .sidebar :is(.list-item,.models-row){min-height:39px}.harness-enabled .sidebar :is(.list-item svg,.section-icon,.sidebar-action-icon){width:15px;height:15px;flex-basis:15px;transform:translateY(.25px)}.harness-enabled .sidebar .grow{transform:translateY(.25px)}.harness-enabled .chat-input-left{padding-left:6px}.harness-enabled .chat-input-right{padding-right:2px}
