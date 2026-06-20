@@ -1,5 +1,5 @@
 // ============================================
-// Odysseus UI — Main Application Orchestrator
+//  UI — Main Application Orchestrator
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
 import Storage from './js/storage.js';
@@ -351,7 +351,7 @@ function initializeEventListeners() {
       e.stopPropagation();
       exportMenu.classList.remove('open');
       const meta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
-      const sessionName = meta ? meta.name : 'Odysseus Chat';
+      const sessionName = meta ? meta.name : ' Chat';
       const originalTitle = document.title;
       document.title = sessionName;
       const chatHistory = document.getElementById('chat-history');
@@ -2195,7 +2195,7 @@ function initializeEventListeners() {
       pickerWrap.classList.toggle('picker-auto-hidden', w < PICKER_HIDE_WIDTH);
       // Hide placeholder text
       if (textarea) {
-        textarea.setAttribute('placeholder', w < PLACEHOLDER_HIDE_WIDTH ? '' : 'Message Odysseus...');
+        textarea.setAttribute('placeholder', w < PLACEHOLDER_HIDE_WIDTH ? '' : 'Message ...');
       }
       // Hide entire bottom toolbar (tools, mode toggle) — only send button remains
       if (inputBottom) {
@@ -3414,7 +3414,7 @@ function initializeEventListeners() {
 // ============================================
 // INITIALIZATION ON PAGE LOAD
 // ============================================
-function startOdysseusApp() {
+function startApp() {
   if (window.__odysseusAppStarted) return;
   window.__odysseusAppStarted = true;
   // Set CSS variables
@@ -3797,10 +3797,13 @@ function startOdysseusApp() {
     const _debouncedUpdateIcon = uiModule.debounce(_updateSendBtnIcon, 50);
     const _MODEL_PICKER_HIDE_CHARS = 10;
     const _syncModelPickerAutohide = () => {
-      const hidePicker = (messageInput.value || '').replace(/\s/g, '').length >= _MODEL_PICKER_HIDE_CHARS;
+      const compactText = (messageInput.value || '').replace(/\s/g, '');
+      const hidePicker = compactText.length >= _MODEL_PICKER_HIDE_CHARS;
       if (modelPickerWrap) {
         modelPickerWrap.classList.toggle('model-picker-autohide', hidePicker);
       }
+      const bar = document.querySelector('.chat-input-bar');
+      if (bar) bar.classList.toggle('has-draft', compactText.length > 0);
     };
     window._syncModelPickerAutohide = _syncModelPickerAutohide;
     _syncModelPickerAutohide();
@@ -4152,7 +4155,7 @@ function startOdysseusApp() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startOdysseusApp, { once: true });
+  document.addEventListener('DOMContentLoaded', startApp, { once: true });
 } else {
-  startOdysseusApp();
+  startApp();
 }

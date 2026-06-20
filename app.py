@@ -1,4 +1,5 @@
 # app.py — slim orchestrator
+import src.white_label as wl
 import mimetypes
 import os
 
@@ -79,9 +80,9 @@ logger = logging.getLogger(__name__)
 # and passed to FastAPI so we can use the modern context-manager lifecycle
 # instead of the deprecated @app.on_event("startup"/"shutdown") decorators.
 app = FastAPI(
-    title="AI Chat Application",
-    description="Comprehensive AI chat with memory, research, and multi-modal capabilities",
-    version="1.0.0",
+    title=wl.APP_NAME or "App",
+    description=wl.APP_DESCRIPTION,
+    version=wl.APP_VERSION,
 )
 
 # ========= CORS =========
@@ -97,8 +98,8 @@ app.add_middleware(
         "Content-Type",
         "X-API-Key",
         "X-Auth-Token",
-        "X-Odysseus-Internal-Token",
-        "X-Odysseus-Owner",
+        wl.header("Internal-Token"),
+        wl.header("Owner"),
         "X-Requested-With",
         "X-TZ-Offset",
     ],
@@ -267,7 +268,7 @@ if AUTH_ENABLED:
                     # X-Odysseus-Owner, attribute the request to that user only
                     # if they exist. Authorization checks remain separate; this
                     # is just owner attribution for notes/calendar/etc.
-                    _impersonate = (request.headers.get("X-Odysseus-Owner") or "").strip()
+                    _impersonate = (request.headers.get(wl.header("Owner")) or "").strip()
                     _auth_mgr = getattr(request.app.state, "auth_manager", None) or auth_manager
                     if _impersonate and _impersonate in getattr(_auth_mgr, "users", {}):
                         request.state.current_user = _impersonate
@@ -283,6 +284,11 @@ if AUTH_ENABLED:
             # Cloudflare tunnel / reverse proxy. Keep LOCALHOST_BYPASS=false for
             # network-exposed deployments regardless.
             if LOCALHOST_BYPASS and _is_trusted_loopback(request):
+                if not getattr(request.state, "current_user", None):
+                    _users = auth_manager.users
+                    _admin = next((u for u, d in _users.items() if d.get("is_admin")), None)
+                    request.state.current_user = _admin or "localhost-bypass"
+                    request.state.api_token = False
                 return await call_next(request)
             if not auth_manager.is_configured:
                 # No users yet — redirect to login for first-time setup
@@ -724,11 +730,22 @@ app.include_router(setup_companion_routes())
 # ========= ROUTES (kept in app.py) =========
 
 def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
-    """Read an HTML file and inject the CSP nonce into inline <script> tags."""
+    """Read an HTML file and inject the CSP nonce + brand config into inline scripts."""
     with open(file_path, "r", encoding="utf-8") as f:
         html = f.read()
     nonce = getattr(request.state, "csp_nonce", "")
     html = html.replace("{{CSP_NONCE}}", nonce)
+    import json as _json
+    _brand = _json.dumps({
+        "appName": wl.APP_NAME,
+        "appShortName": wl.APP_SHORT_NAME,
+        "appLogoText": wl.APP_LOGO_TEXT,
+        "brandColor": wl.BRAND_COLOR,
+        "appVersion": wl.APP_VERSION,
+        "headerPrefix": wl.HEADER_PREFIX,
+        "mailOrigin": wl.MAIL_ORIGIN,
+    })
+    html = html.replace("{{BRAND_CONFIG}}", _brand)
     return HTMLResponse(html)
 
 @app.get("/")
@@ -843,7 +860,25 @@ app.router.lifespan_context = _lifespan
 async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
-    webhook_manager.set_loop(asyncio.get_running_loop())
+
+    # Suppress unhandled async-generator cleanup errors (e.g. anyio cancel-scope
+    # RuntimeError from MCP stdio client teardown) so they don't crash the server.
+    loop = asyncio.get_running_loop()
+    _default_handler = loop.get_exception_handler()
+
+    def _resilient_exception_handler(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, RuntimeError) and "cancel scope" in str(exc):
+            logger.warning("Suppressed async generator cleanup error: %s", exc)
+            return
+        if _default_handler:
+            _default_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_resilient_exception_handler)
+
+    webhook_manager.set_loop(loop)
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
     try:
@@ -890,6 +925,7 @@ async def _startup_event():
             logger.warning(f"MCP startup failed (non-critical): {type(e).__name__}: {e}")
 
     _startup_tasks.append(asyncio.create_task(_startup_mcp_connections()))
+    _startup_tasks[-1].add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     # Pre-warm the RAG tool index off the request path. Loading the local
     # embedding model + opening ChromaDB + indexing the built-in tools is a

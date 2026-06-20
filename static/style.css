@@ -2264,6 +2264,38 @@ body.bg-pattern-sparkles {
     .chat-input-left > .input-icon-btn.toolbar-collapsed {
       display: none !important;
     }
+    /* Minimal/agentic command deck: idle state shows only the primary input,
+       send/new-chat, active trust chips, and the single More tools affordance.
+       Secondary tools reveal when the user focuses or starts typing. */
+    .chat-input-bar:not(.has-draft) .chat-input-left > .input-icon-btn[data-mode-tool]:not(.active):not(.expanded),
+    .chat-input-bar:not(.has-draft) .chat-input-left > .input-icon-btn:not(.tool-indicator):not(.active):not(.expanded):not([style*="display: none"]) {
+      opacity: 0;
+      transform: translateY(2px) scale(0.92);
+      pointer-events: none;
+      width: 0;
+      min-width: 0;
+      padding-left: 0;
+      padding-right: 0;
+      margin-left: -4px;
+      overflow: hidden;
+    }
+    .chat-input-bar.has-draft .chat-input-left > .input-icon-btn {
+      transform: none;
+    }
+    .chat-input-bar:not(.has-draft) .chat-input-right .mode-toggle {
+      opacity: 0;
+      transform: translateY(2px) scale(0.94);
+      pointer-events: none;
+      width: 0;
+      overflow: hidden;
+      margin-right: -8px;
+    }
+    .chat-input-bar.has-draft .chat-input-right .mode-toggle {
+      opacity: 1;
+      transform: none;
+      width: auto;
+      margin-right: 0;
+    }
     /* Always keep overflow wrapper visible and leftmost */
     .chat-input-left > .overflow-wrapper {
       flex-shrink: 0;
@@ -2295,7 +2327,7 @@ body.bg-pattern-sparkles {
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: opacity 0.15s, background 0.15s, color 0.15s;
+      transition: opacity 0.15s, background 0.15s, color 0.15s, transform 0.15s, width 0.15s, padding 0.15s, margin 0.15s;
       position: relative;
     }
     .input-icon-btn:hover {
@@ -2327,6 +2359,12 @@ body.bg-pattern-sparkles {
     .plan-approve-btn:hover {
       background: color-mix(in srgb, var(--accent) 22%, transparent);
     }
+    .plan-approve-btn:disabled,
+    .plan-open-btn:disabled {
+      cursor: default;
+      opacity: 0.62;
+      transform: none;
+    }
     .plan-approve-btn:active {
       transform: scale(0.97);
     }
@@ -2348,6 +2386,13 @@ body.bg-pattern-sparkles {
     }
     .plan-open-btn:hover {
       background: color-mix(in srgb, var(--fg) 15%, transparent);
+    }
+    .plan-execution-note {
+      margin-top: 6px;
+      max-width: 52rem;
+      color: color-mix(in srgb, var(--fg) 72%, transparent);
+      font-size: 12px;
+      line-height: 1.45;
     }
     /* GitHub-style task lists (- [ ] / - [x]) — used by plan-mode checklists */
     li.task-item {

@@ -1,7 +1,7 @@
 """Codex integration routes.
 
 These are small HTTP surfaces intended for the Codex plugin/MCP bridge. They
-reuse existing Odysseus helpers and enforce API-token scopes before touching
+reuse existing helpers and enforce API-token scopes before touching
 user data.
 """
 
@@ -17,6 +17,8 @@ from fastapi.responses import StreamingResponse
 
 from src.auth_helpers import require_user
 from src.tool_implementations import do_manage_notes
+import src.white_label as wl
+
 
 
 COOKBOOK_READ_SCOPES = {"cookbook:read", "cookbook:launch"}

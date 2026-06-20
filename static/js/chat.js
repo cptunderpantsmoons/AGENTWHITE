@@ -89,16 +89,23 @@ import createResearchSynapse from './researchSynapse.js';
   let _lastReaderActivity = 0; // Timestamp of last reader.read() success — used to detect frozen streams
   let _webLockRelease = null;  // Function to release the Web Lock held during streaming
   let _forcePlanOff = false;   // One-shot: suppress plan_mode for the next send (Approve & Run)
+  let _approvedPlanRunPending = false; // One-shot UI state: approval crossed into execution
 
   // ── Plan store: the latest proposed/approved checklist for the CURRENT chat ──
   // Kept so (a) it can be sent back each turn and pinned in context (a long plan
   // on a weak model survives history truncation), and (b) the plan window can be
   // re-opened/docked at any time via the plan-button menu. Stored per session in
   // localStorage so it survives a reload mid-execution.
-  function _setStoredPlan(text) {
+  function _setStoredPlan(text, approved = null) {
     const sid = sessionModule.getCurrentSessionId();
     if (!sid || !text || !text.trim()) return;
-    Storage.setJSON(Storage.KEYS.PLAN, { sid, text });
+    const prev = Storage.getJSON(Storage.KEYS.PLAN, null);
+    const prevApproved = !!(prev && prev.sid === sid && prev.approved);
+    Storage.setJSON(Storage.KEYS.PLAN, {
+      sid,
+      text,
+      approved: approved === null ? prevApproved : !!approved,
+    });
     // Live-refresh the plan window if it's open (shows progress as the agent
     // restates the checklist with [x]).
     try {
@@ -111,6 +118,11 @@ import createResearchSynapse from './researchSynapse.js';
     const sid = sessionModule.getCurrentSessionId();
     const rec = Storage.getJSON(Storage.KEYS.PLAN, null);
     return (rec && rec.sid === sid && rec.text) ? rec.text : '';
+  }
+  function _getApprovedPlan() {
+    const sid = sessionModule.getCurrentSessionId();
+    const rec = Storage.getJSON(Storage.KEYS.PLAN, null);
+    return (rec && rec.sid === sid && rec.text && rec.approved) ? rec.text : '';
   }
   // A line like "- [ ] step" / "- [x] step" marks a GitHub-style checklist.
   const _CHECKLIST_RE = /^\s*[-*]\s+\[[ xX]\]\s+/m;
@@ -261,6 +273,24 @@ import createResearchSynapse from './researchSynapse.js';
 
   // API key pattern for the guard in handleChatSubmit
   const API_KEY_RE = /^(sk-[a-zA-Z0-9_\-]{20,}|gsk_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\-]{30,}|xai-[a-zA-Z0-9]{20,})$/;
+
+  // Just-in-time canvas: open the document pane only when the user asks for a
+  // durable artifact. This keeps the default UI quiet, but makes reports/docs
+  // land in the right-side canvas instead of hiding behind the Library button.
+  function _wantsArtifactCanvas(message) {
+    const text = String(message || '').toLowerCase();
+    if (!text.trim()) return false;
+
+    const artifactNoun = /\b(report|write[- ]?up|document|doc|brief|memo|proposal|presentation|deck|outline|whitepaper|case study|summary|analysis|spec|requirements|manual|guide|playbook|article|blog post|email draft|letter)\b/;
+    const creationVerb = /\b(create|make|generate|draft|write|prepare|compose|produce|build|put together|turn .* into|format .* as|convert .* to)\b/;
+    const explicitCanvas = /\b(open|show|use|put|place|display|render)\b.{0,32}\b(canvas|document pane|document panel|doc pane|right pane|right panel)\b/;
+
+    // Avoid opening the canvas for questions *about* reports/docs unless the
+    // user is asking us to produce one. Minimalist means relevant, not psychic.
+    const informationalQuestion = /^(what|why|how|when|where|who)\b/.test(text.trim());
+    return explicitCanvas.test(text)
+      || (artifactNoun.test(text) && creationVerb.test(text) && !informationalQuestion);
+  }
 
 
   /**
@@ -537,6 +567,7 @@ import createResearchSynapse from './researchSynapse.js';
     const streamSessionId = sessionModule.getCurrentSessionId();
     _streamSessionId = streamSessionId;
     const streamQuery = msg;
+    const _isApprovedPlanRun = _approvedPlanRunPending;
     _lastReaderActivity = Date.now();
 
     // Acquire Web Lock to hint browser not to discard this tab while streaming
@@ -743,11 +774,6 @@ import createResearchSynapse from './researchSynapse.js';
         setTimeout(() => { if (banner.parentNode) banner.remove(); }, 15000);
       }
 
-      // Auto-save document editor content before sending so the AI sees latest text
-      if (documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
-        try { await documentModule.saveDocument(); } catch(e) { console.warn('doc auto-save failed', e); }
-      }
-
       // Inject document selection context if present
       let finalMsg = msg;
       if (docSel) {
@@ -763,6 +789,19 @@ import createResearchSynapse from './researchSynapse.js';
           });
           finalMsg = `In the document, edit these specific sections:\n\n${parts.join('\n\n')}\n\nInstruction: ${msg}`;
         }
+      }
+
+      // If the user is asking for a durable artifact (report, memo, guide,
+      // deck, etc.), reveal the document canvas just-in-time on the right.
+      // Do this before mode calculation so openPanel() can promote to Agent
+      // mode and the request gets the right tool permissions.
+      if (documentModule && _wantsArtifactCanvas(finalMsg) && !documentModule.isPanelOpen()) {
+        try { documentModule.openPanel && documentModule.openPanel(); } catch (e) { console.warn('doc auto-open failed', e); }
+      }
+
+      // Auto-save document editor content before sending so the AI sees latest text
+      if (documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
+        try { await documentModule.saveDocument(); } catch(e) { console.warn('doc auto-save failed', e); }
       }
 
       // Apply inject prefix/suffix
@@ -817,7 +856,7 @@ import createResearchSynapse from './researchSynapse.js';
       } else if (isAgentMode) {
         // Executing (not proposing): send the stored plan back so the backend
         // pins it in context and the agent can always re-reference it.
-        const _sp = _getStoredPlan();
+        const _sp = _getApprovedPlan();
         if (_sp) fd.append('approved_plan', _sp);
       }
       const ragChk = el('rag-toggle');
@@ -887,6 +926,8 @@ import createResearchSynapse from './researchSynapse.js';
                        Fetching top results...</span>`;
       } else if (el('research-toggle').checked) {
         loadingText = 'Deep research mode active...';
+      } else if (_isApprovedPlanRun) {
+        loadingText = 'Executing approved plan...';
       } else {
         loadingText = 'Processing request...';
       }
@@ -906,15 +947,26 @@ import createResearchSynapse from './researchSynapse.js';
       bodyDiv.appendChild(spinner.createElement());
       spinner.start();
       
-      // Update spinner message based on mode
+      // Update spinner message based on mode. Approved-plan execution gets a
+      // quiet trust note, but endpoint probing stays shared with normal sends.
+      const shouldProbeEndpoint = !(el('web-toggle').checked && !_isAgent) && !el('research-toggle').checked;
       if (el('web-toggle').checked && !_isAgent) {
         spinner.updateMessage('Searching web with ' + (searchModule ? searchModule.getProviderLabel() : 'SearXNG'));
         setTimeout(() => spinner.updateMessage('Processing results'), 1500);
       } else if (el('research-toggle').checked) {
         spinner.updateMessage('Researching');
         setTimeout(() => spinner.updateMessage('Analyzing sources'), 1500);
+      } else if (_isApprovedPlanRun) {
+        spinner.updateMessage('Executing approved plan');
+        const trustNote = document.createElement('div');
+        trustNote.className = 'plan-execution-note';
+        trustNote.textContent = 'Plan approved — running with write tools enabled. I’ll update the plan as steps complete.';
+        bodyDiv.appendChild(trustNote);
       } else {
         spinner.updateMessage('Processing request');
+      }
+
+      if (shouldProbeEndpoint) {
         const endpointUrlForProbe = sessionModule.getCurrentEndpointUrl ? sessionModule.getCurrentEndpointUrl() : null;
         if (endpointUrlForProbe && modelName) {
           processingProbeTimer = setTimeout(async () => {
@@ -966,7 +1018,6 @@ import createResearchSynapse from './researchSynapse.js';
           }, 10000);
         }
       }
-      
       const researchBtn = el('research-toggle-btn');
       if (el('research-toggle').checked && researchBtn) {
         researchBtn.disabled = true;
@@ -2765,20 +2816,25 @@ import createResearchSynapse from './researchSynapse.js';
         // the initial proposal AND restated progress during execution. Keeps the
         // stored plan (and the docked plan window) in sync with the latest state.
         if (accumulated && _CHECKLIST_RE.test(accumulated)) {
-          _setStoredPlan(accumulated);
+          _setStoredPlan(accumulated, planTurn ? false : null);
         }
         // Plan mode: the agent has proposed a plan — offer to approve & execute it.
         // Approving re-sends with plan_mode suppressed (full tools) for one turn.
         if (planTurn && accumulated.trim()) {
           const _planText = accumulated;
           const _runApproved = () => {
-            _approveWrap.remove();
+            if (_approveWrap.dataset.running === 'true') return;
+            _approveWrap.dataset.running = 'true';
+            const _approveButtons = _approveWrap.querySelectorAll('button');
+            _approveButtons.forEach((b) => { b.disabled = true; });
+            if (_approveBtn) _approveBtn.textContent = 'Starting…';
             _forcePlanOff = true;
+            _approvedPlanRunPending = true;
             // Persist the approved plan for THIS chat so it's (a) re-sent and
             // pinned in context every execution turn, and (b) re-openable via the
             // plan-button menu. Do this BEFORE flipping the toggle, since the menu
             // intercept keys off a stored plan existing.
-            _setStoredPlan(_planText);
+            _setStoredPlan(_planText, true);
             // Approving exits plan mode for good — turn it OFF directly (NOT via
             // the button's click, which would now open the plan menu instead of
             // toggling) so execution and every follow-up keep full write tools.
@@ -2795,6 +2851,7 @@ import createResearchSynapse from './researchSynapse.js';
             // Show a clean bubble; the full instruction still goes to the model.
             _displayOverride = 'Approved the plan.';
             handleChatSubmit({ preventDefault() {} });
+            _approveWrap.remove();
           };
           var _approveWrap = document.createElement('div');
           _approveWrap.className = 'plan-approve-bar';
@@ -3073,6 +3130,7 @@ import createResearchSynapse from './researchSynapse.js';
     } finally {
       clearResponseTimeout();
       clearProcessingProbe();
+      _approvedPlanRunPending = false;
       // Streaming done — let screen readers announce the settled response.
       const _chatLogDone = document.getElementById('chat-history');
       if (_chatLogDone) _chatLogDone.setAttribute('aria-busy', 'false');

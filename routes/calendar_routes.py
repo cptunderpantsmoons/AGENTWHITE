@@ -14,6 +14,8 @@ from dateutil.rrule import rrulestr
 from core.database import SessionLocal, CalendarCal, CalendarEvent
 from src.auth_helpers import require_user
 from src.upload_limits import read_upload_limited
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +39,8 @@ def _ics_naive_dtstart(dt):
 # Single-user fallback identity. Used only when:
 #   1. The app is configured for single-user (no auth middleware), AND
 #   2. The request didn't resolve to an authenticated user.
-# Override at deploy time via `ODYSSEUS_FALLBACK_OWNER` env var. In a real
-# multi-user install set `ODYSSEUS_SINGLE_USER=0` so unauthenticated requests
+# Override at deploy time via `WL_FALLBACK_OWNER` env var. In a real
+# multi-user install set `WL_SINGLE_USER=0` so unauthenticated requests
 # are rejected instead of silently writing to this address.
 import os as _os
 FALLBACK_OWNER = _os.environ.get("ODYSSEUS_FALLBACK_OWNER", "owner@localhost")
@@ -1315,7 +1317,7 @@ def setup_calendar_routes() -> APIRouter:
             lines = [
                 "BEGIN:VCALENDAR",
                 "VERSION:2.0",
-                "PRODID:-//Odysseus//Calendar//EN",
+                "PRODID:-//App//Calendar//EN",
                 f"X-WR-CALNAME:{_ics_escape(cal.name)}",
             ]
             for ev in events:

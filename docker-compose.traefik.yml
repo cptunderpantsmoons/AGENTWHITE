@@ -1,0 +1,13 @@
+services:
+  app:
+    environment:
+      # setup.py only reads the legacy ODYSSEUS_* names for admin credentials
+      - ODYSSEUS_ADMIN_USER=${WL_ADMIN_USER:-admin}
+      - ODYSSEUS_ADMIN_PASSWORD=${WL_ADMIN_PASSWORD:-}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.carbon.rule=Host(`intelligencehub.cloud`) || Host(`www.intelligencehub.cloud`)"
+      - "traefik.http.routers.carbon.entrypoints=websecure"
+      - "traefik.http.routers.carbon.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.carbon.service=carbon"
+      - "traefik.http.services.carbon.loadbalancer.server.port=7000"

@@ -23,6 +23,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+import src.white_label as wl
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -32,12 +34,14 @@ import httpx
 # we reuse the public VS Code client id (the de-facto standard third-party
 # clients use). Override via env if you register your own allow-listed app.
 COPILOT_CLIENT_ID = os.environ.get(
-    "ODYSSEUS_COPILOT_CLIENT_ID", "01ab8ac9400c4e429b23"
+    "WL_COPILOT_CLIENT_ID",
+    os.environ.get("ODYSSEUS_COPILOT_CLIENT_ID", "01ab8ac9400c4e429b23"),
 )
 
 # Dated API version header required by the Copilot API (models + chat).
 COPILOT_API_VERSION = os.environ.get(
-    "ODYSSEUS_COPILOT_API_VERSION", "2026-06-01"
+    "WL_COPILOT_API_VERSION",
+    os.environ.get("ODYSSEUS_COPILOT_API_VERSION", "2026-06-01"),
 )
 
 # Public Copilot API base. GitHub Enterprise uses ``copilot-api.<domain>``.
@@ -46,13 +50,16 @@ COPILOT_BASE = "https://api.githubcopilot.com"
 # Copilot wants an editor-like User-Agent + integration id. These identify the
 # client to GitHub; keep them stable.
 COPILOT_USER_AGENT = os.environ.get(
-    "ODYSSEUS_COPILOT_USER_AGENT", "Odysseus/1.0"
+    "WL_COPILOT_USER_AGENT",
+    os.environ.get("ODYSSEUS_COPILOT_USER_AGENT", wl.COPILOT_USER_AGENT),
 )
 COPILOT_INTEGRATION_ID = os.environ.get(
-    "ODYSSEUS_COPILOT_INTEGRATION_ID", "vscode-chat"
+    "WL_COPILOT_INTEGRATION_ID",
+    os.environ.get("ODYSSEUS_COPILOT_INTEGRATION_ID", "vscode-chat"),
 )
 COPILOT_EDITOR_VERSION = os.environ.get(
-    "ODYSSEUS_COPILOT_EDITOR_VERSION", "Odysseus/1.0"
+    "WL_COPILOT_EDITOR_VERSION",
+    os.environ.get("ODYSSEUS_COPILOT_EDITOR_VERSION", wl.COPILOT_EDITOR_VERSION),
 )
 
 # OAuth scope requested during the device flow.

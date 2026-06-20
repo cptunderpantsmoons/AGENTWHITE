@@ -2,14 +2,28 @@
   "name": "carbon-agent-desktop",
   "version": "1.0.0",
   "description": "CarbonAgent — AI workspace for chat, memory, research, and tools",
+  "main": "electron/main.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/carbon-agent/carbon-agent.git"
   },
+  "scripts": {
+    "start": "electron .",
+    "test": "python3 -m pytest tests/test_readme_ascii_fenced.py -q && node --check static/js/theme.js",
+    "embed-python": "bash scripts/embed-python.sh",
+    "build:win": "electron-builder --win",
+    "build:win:portable": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build:mac": "electron-builder --mac",
+    "build": "electron-builder --win"
+  },
   "devDependencies": {
-    "@antithesishq/bombadil": "^0.3.2"
+    "@antithesishq/bombadil": "^0.3.2",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.0"
   },
   "dependencies": {
+    "2": "^3.0.0",
     "@anthropic-ai/sdk": "^0.98.0"
   }
 }

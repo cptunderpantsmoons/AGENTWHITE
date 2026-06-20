@@ -11,6 +11,8 @@ from fastapi import HTTPException
 from typing import Optional, Dict, List, Tuple
 from src.model_context import get_context_length, DEFAULT_CONTEXT
 from urllib.parse import urlparse
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -297,9 +299,9 @@ def _normalize_ollama_url(url: str) -> str:
 
 
 def _ollama_normalize_tool_messages(messages: List[Dict]) -> List[Dict]:
-    """Adapt Odysseus' canonical OpenAI-style messages to native Ollama /api/chat.
+    """Adapt canonical OpenAI-style messages to native Ollama /api/chat.
 
-    Odysseus carries assistant tool calls in the OpenAI shape, where
+    The app carries assistant tool calls in the OpenAI shape, where
     `function.arguments` is a JSON *string*. Native Ollama expects it to be a
     JSON *object*; given the string it fails the whole request with HTTP 400
     "Value looks like object, but can't find closing '}' symbol", which aborts
@@ -427,7 +429,7 @@ def _provider_headers(provider: str, headers: Optional[Dict] = None) -> Dict[str
         h.update(headers)
     if provider == "openrouter":
         h.setdefault("HTTP-Referer", "https://github.com/pewdiepie-archdaemon/odysseus")
-        h.setdefault("X-OpenRouter-Title", "Odysseus")
+        h.setdefault("X-OpenRouter-Title", wl.APP_NAME)
     if provider == "copilot":
         # Ensure the Copilot-required headers are present even when the caller
         # didn't pass pre-built headers (e.g. model listing). build_headers()
@@ -711,7 +713,7 @@ def _as_content_blocks(content) -> List[Dict]:
 
 
 def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
-    """Strip Odysseus-only metadata before sending messages to providers.
+    """Strip app-only metadata before sending messages to providers.
 
     Per the OpenAI chat format: user/system messages must have content; a tool
     message needs content + tool_call_id; an assistant message may carry content,

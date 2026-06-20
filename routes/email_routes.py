@@ -36,6 +36,8 @@ from fastapi.responses import FileResponse
 from src.llm_core import llm_call_async
 from src.upload_limits import read_upload_limited
 
+import src.white_label as wl
+
 from routes.email_helpers import (
     _strip_think, _extract_reply, _apply_email_style_mechanics, require_owner, require_user, _assert_owns_account,
     _q, _attach_compose_uploads, _cleanup_compose_uploads,
@@ -55,273 +57,22 @@ from routes.email_pollers import _start_poller
 
 logger = logging.getLogger(__name__)
 
-ODYSSEUS_MAIL_ORIGIN = "odysseus-ui"
-EMAIL_COMPOSE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+MAIL_ORIGIN = wl.MAIL_ORIGIN
 
-
-def _email_tag_owner_aliases(account_id: str | None, owner: str = "") -> list[str]:
-    aliases = [owner or ""]
-    try:
-        from core.database import SessionLocal as _SL, EmailAccount as _EA
-        db = _SL()
-        try:
-            resolved_account_id = account_id
-            if not resolved_account_id:
-                try:
-                    cfg = _get_email_config(None, owner=owner)
-                    resolved_account_id = cfg.get("account_id") or None
-                    aliases.extend([
-                        cfg.get("imap_user") or "",
-                        cfg.get("smtp_user") or "",
-                        cfg.get("from_address") or "",
-                    ])
-                except Exception:
-                    resolved_account_id = None
-            row = db.get(_EA, resolved_account_id) if resolved_account_id else None
-            if row:
-                aliases.extend([row.owner or "", row.imap_user or "", row.from_address or ""])
-        finally:
-            db.close()
-    except Exception:
-        pass
-    out = []
-    for a in aliases:
-        a = (a or "").strip()
-        if a not in out:
-            out.append(a)
-    return out or [""]
-
-
-def _email_tag_owner_clause(account_id: str | None, owner: str = "") -> tuple[str, list[str]]:
-    aliases = _email_tag_owner_aliases(account_id, owner)
-    placeholders = ",".join("?" * len(aliases))
-    # In configured multi-user mode, do not treat legacy owner='' rows as
-    # visible to everyone. Single-user/unconfigured mode keeps legacy rows.
-    if owner:
-        return f"owner IN ({placeholders})", aliases
-    return f"(owner IN ({placeholders}) OR owner IS NULL)", aliases
-
-
-def _record_email_received_events(owner: str, account_id: str | None, folder: str, emails: list[dict]):
-    """Baseline inbox messages, then fire `email_received` for new arrivals."""
-    if not owner or (folder or "INBOX").upper() != "INBOX" or not emails:
-        return
-    try:
-        from src.event_bus import fire_event
-        account_key = (account_id or "default").strip() or "default"
-        now = datetime.utcnow().isoformat() + "Z"
-        keys = []
-        for e in emails:
-            key = (e.get("message_id") or e.get("uid") or "").strip()
-            if key and key not in keys:
-                keys.append(key)
-        if not keys:
-            return
-
-        conn = _sql3.connect(SCHEDULED_DB)
-        try:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS email_event_seen ("
-                "owner TEXT NOT NULL, account_key TEXT NOT NULL, folder TEXT NOT NULL, "
-                "message_key TEXT NOT NULL, first_seen_at TEXT NOT NULL, "
-                "PRIMARY KEY (owner, account_key, folder, message_key))"
-            )
-            count = conn.execute(
-                "SELECT COUNT(*) FROM email_event_seen WHERE owner=? AND account_key=? AND folder=?",
-                (owner, account_key, folder),
-            ).fetchone()[0]
-            existing = set()
-            if count:
-                placeholders = ",".join("?" * len(keys))
-                rows = conn.execute(
-                    f"SELECT message_key FROM email_event_seen "
-                    f"WHERE owner=? AND account_key=? AND folder=? AND message_key IN ({placeholders})",
-                    (owner, account_key, folder, *keys),
-                ).fetchall()
-                existing = {r[0] for r in rows}
-            new_keys = [k for k in keys if k not in existing]
-            conn.executemany(
-                "INSERT OR IGNORE INTO email_event_seen "
-                "(owner, account_key, folder, message_key, first_seen_at) VALUES (?, ?, ?, ?, ?)",
-                [(owner, account_key, folder, k, now) for k in keys],
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        if count and new_keys:
-            for _ in new_keys[:50]:
-                fire_event("email_received", owner)
-            logger.info("Fired email_received for %d new message(s)", min(len(new_keys), 50))
-    except Exception:
-        logger.debug("email_received event detection skipped", exc_info=True)
-
-
-def _folder_name_from_list_line(line) -> str | None:
-    decoded = line.decode() if isinstance(line, bytes) else str(line)
-    match = re.search(r'"([^"]*)"\s*$|(\S+)\s*$', decoded)
-    if not match:
-        return None
-    return match.group(1) or match.group(2)
-
-
-def _list_imap_folders(conn) -> tuple[list, list[str]]:
-    try:
-        status, folders = conn.list()
-        if status != "OK" or not folders:
-            return [], []
-        names = [name for name in (_folder_name_from_list_line(f) for f in folders) if name]
-        return folders, names
-    except Exception:
-        return [], []
-
-
-def _resolve_mail_folder(conn, preferred: str, role: str = "") -> str:
-    """Resolve provider-specific names such as Gmail's [Gmail]/Bin/Spam."""
-    folders, names = _list_imap_folders(conn)
-    if preferred and preferred in names:
-        return preferred
-    role_flags = {
-        "trash": ("\\Trash",),
-        "archive": ("\\Archive", "\\All"),
-        "junk": ("\\Junk",),
-    }.get(role, ())
-    for f in folders:
-        decoded = f.decode() if isinstance(f, bytes) else str(f)
-        if any(flag in decoded for flag in role_flags):
-            name = _folder_name_from_list_line(f)
-            if name:
-                return name
-    candidates = {
-        "trash": ("Trash", "[Gmail]/Trash", "[Google Mail]/Trash", "Bin", "[Gmail]/Bin", "Deleted Messages", "Deleted Items"),
-        "archive": ("Archive", "Archives", "[Gmail]/All Mail", "[Google Mail]/All Mail", "All Mail"),
-        "junk": ("Junk", "Spam", "[Gmail]/Spam", "[Google Mail]/Spam"),
-    }.get(role, ())
-    lower_map = {n.lower(): n for n in names}
-    for candidate in candidates:
-        found = lower_map.get(candidate.lower())
-        if found:
-            return found
-    return preferred
-
-
-def _folder_role_from_name(name: str) -> str:
-    lower = (name or "").lower()
-    if "trash" in lower or "bin" in lower or "deleted" in lower:
-        return "trash"
-    if "spam" in lower or "junk" in lower:
-        return "junk"
-    if "archive" in lower or "all mail" in lower:
-        return "archive"
-    return ""
-
-
-def _uid_bytes(uid: str | bytes) -> bytes:
-    return uid if isinstance(uid, bytes) else str(uid).encode()
-
-
-def _uid_exists(conn, uid: str) -> bool:
-    try:
-        status, data = conn.uid("FETCH", _uid_bytes(uid), "(UID)")
-        if status != "OK":
-            return False
-        for part in data or []:
-            meta = part[0] if isinstance(part, tuple) else part
-            meta_b = meta if isinstance(meta, bytes) else str(meta).encode()
-            if re.search(rb"\bUID\s+\d+\b", meta_b):
-                return True
-        return False
-    except Exception:
-        return False
-
-
-def _imap_uid_search(conn, criteria: str):
-    return conn.uid("SEARCH", None, criteria)
-
-
-def _imap_uid_fetch(conn, uid_set: str | bytes, query: str):
-    return conn.uid("FETCH", _uid_bytes(uid_set), query)
-
-
-def _uid_from_fetch_meta(meta_b: bytes) -> str:
-    m = re.search(rb"\bUID\s+(\d+)\b", meta_b)
-    return m.group(1).decode() if m else ""
-
-
-def _smtp_ready(cfg: dict) -> bool:
-    return bool(cfg.get("smtp_host") and cfg.get("smtp_user") and cfg.get("smtp_password"))
-
-
-def _resolve_send_config(account_id: str | None = None, owner: str = "") -> dict:
-    """Resolve an account for outbound SMTP.
-
-    If the caller explicitly picked an account, use only that account and
-    return a clear error when it cannot send. If no account was picked and
-    the default is receive-only, fall back to the first SMTP-capable account
-    owned by the same user.
-    """
-    cfg = _get_email_config(account_id, owner=owner)
-    if _smtp_ready(cfg):
-        return cfg
-    if account_id:
-        raise ValueError(f"Email account {cfg.get('account_name') or account_id} has no SMTP configured")
-    try:
-        from core.database import SessionLocal as _SL, EmailAccount as _EA
-        from sqlalchemy import and_, or_
-        db = _SL()
-        try:
-            q = db.query(_EA).filter(_EA.enabled == True)  # noqa: E712
-            if owner:
-                unowned = or_(_EA.owner == None, _EA.owner == "")  # noqa: E711
-                same_mailbox = or_(_EA.imap_user == owner, _EA.from_address == owner)
-                q = q.filter(or_(_EA.owner == owner, and_(unowned, same_mailbox)))
-            for row in q.order_by(_EA.is_default.desc(), _EA.created_at.asc()).all():
-                trial = _get_email_config(account_id=row.id, owner=owner)
-                if _smtp_ready(trial):
-                    return trial
-        finally:
-            db.close()
-    except Exception as e:
-        logger.debug(f"SMTP-capable account fallback failed: {e}")
-    raise ValueError("No SMTP-capable email account configured")
-
-
-def _store_email_flag(conn, uid: str, flag: str, add: bool = True) -> bool:
-    op = "+FLAGS" if add else "-FLAGS"
-    if _uid_exists(conn, uid):
-        status, _ = conn.uid("STORE", _uid_bytes(uid), op, flag)
-    else:
-        status, _ = conn.store(_uid_bytes(uid), op, flag)
-    return status == "OK"
-
-
-def _move_email_message(conn, uid: str, dest: str, role: str = "") -> bool:
-    dest = _resolve_mail_folder(conn, dest, role or _folder_role_from_name(dest))
-    if _uid_exists(conn, uid):
-        status, _ = conn.uid("MOVE", _uid_bytes(uid), _q(dest))
-        if status == "OK":
-            return True
-        status, _ = conn.uid("COPY", _uid_bytes(uid), _q(dest))
-        if status != "OK":
-            return False
-        status, _ = conn.uid("STORE", _uid_bytes(uid), "+FLAGS", "\\Deleted")
-    else:
-        status, _ = conn.copy(_uid_bytes(uid), _q(dest))
-        if status != "OK":
-            return False
-        status, _ = conn.store(_uid_bytes(uid), "+FLAGS", "\\Deleted")
-    if status == "OK":
-        conn.expunge()
-        return True
-    return False
-
-
-def _apply_odysseus_headers(msg, kind: str | None = None, ref_id: str | None = None):
-    msg["X-Odysseus-Origin"] = ODYSSEUS_MAIL_ORIGIN
+async def send_or_draft_email(request: Request):
+    data = await request.json()
+    action = data.get("action", "send")
+    msg = MIMEMultipart("mixed" if data.get("attachments") else "alternative")
+    if action == "draft":
+        msg["X-Unsent"] = "1"
+    msg["From"] = data["from"]
+    msg["To"] = data["to"]
+    msg["Subject"] = data.get("subject", "")
+    msg[wl.header("Origin")] = MAIL_ORIGIN
     if kind:
-        msg["X-Odysseus-Kind"] = re.sub(r"[^A-Za-z0-9_.-]", "-", kind)[:64]
+        msg[wl.header("Kind")] = re.sub(r"[^A-Za-z0-9_.-]", "-", kind)[:64]
     if ref_id:
-        msg["X-Odysseus-Ref"] = re.sub(r"[^A-Za-z0-9_.:-]", "-", ref_id)[:128]
+        msg[wl.header("Ref")] = re.sub(r"[^A-Za-z0-9_.:-]", "-", ref_id)[:128]
 
 
 def _envelope_recipients(*fields: str) -> list:
@@ -459,6 +210,10 @@ def _sanitize_email_html(raw: str) -> str:
 def setup_email_routes():
     _start_poller()
     router = APIRouter(prefix="/api/email", tags=["email"])
+
+    router.post("/send")(send_or_draft_email)
+    router.put("/draft")(send_or_draft_email)
+    router.post("/draft-from-event")(send_or_draft_email)
 
     # ── In-memory cache + prefetch + IMAP connection pool ──
     # Three layers stacked because every cold click was hitting Dovecot
@@ -641,12 +396,12 @@ def setup_email_routes():
                 # All emails NOT marked as answered/done (read or unread).
                 status, data = _imap_uid_search(conn, f"(UNANSWERED{from_clause})")
             elif filter_ == "reminders":
-                # Prefer the Odysseus marker header, but include the subject
-                # fallback too. The fallback uses a distinct Odysseus prefix
+                # Prefer the app marker header, but include the subject
+                # fallback too. The fallback uses a distinct prefix
                 # so ordinary emails containing "Reminder" don't get mixed in.
                 status, data = _imap_uid_search(
                     conn,
-                    f'(OR HEADER X-Odysseus-Kind "reminder" SUBJECT "Reminder (Odysseus):"{from_clause})',
+                    f'(OR HEADER X-Odysseus-Kind "reminder" HEADER {wl.header("Kind")} "reminder" SUBJECT "Reminder ({wl.APP_SHORT_NAME}):"{from_clause})',
                 )
             elif filter_ == "pending_30d":
                 # "What's pending in the last month" — UNANSWERED + delivered
@@ -1755,7 +1510,7 @@ def setup_email_routes():
         permanent: bool = Query(False),
         owner: str = Depends(require_owner),
     ):
-        """Delete email messages stamped as Odysseus reminders."""
+        """Delete email messages stamped as app reminders."""
         if account_id:
             _assert_owns_account(account_id, owner)
         deleted = 0
@@ -1793,12 +1548,12 @@ def setup_email_routes():
                         # Match the Reminders filter: new messages have the
                         # explicit kind header, and subject fallback catches
                         # clients/providers that stripped custom headers.
-                        uids.update(_search_uids(conn, f'(HEADER X-Odysseus-Kind {_search_quote("reminder")})'))
-                        uids.update(_search_uids(conn, f'(SUBJECT {_search_quote("Reminder (Odysseus):")})'))
+                        uids.update(_search_uids(conn, f'(OR HEADER X-Odysseus-Kind {_search_quote("reminder")} HEADER {wl.header("Kind")} {_search_quote("reminder")})'))
+                        uids.update(_search_uids(conn, f'(OR SUBJECT {_search_quote("Reminder (Odysseus):")} SUBJECT {_search_quote(f"Reminder ({wl.APP_SHORT_NAME}):")})'))
                         for addr in own_addrs:
                             addr_q = _search_quote(addr)
-                            uids.update(_search_uids(conn, f'(FROM {addr_q} SUBJECT {_search_quote("Reminder (Odysseus):")})'))
-                            # Legacy reminders created before the Odysseus
+                            uids.update(_search_uids(conn, f'(FROM {addr_q} OR SUBJECT {_search_quote("Reminder (Odysseus):")} SUBJECT {_search_quote(f"Reminder ({wl.APP_SHORT_NAME}):")})'))
+                            # Legacy reminders created before
                             # prefix still came from this mailbox as
                             # "Reminder: ..."; include them in Clear without
                             # sweeping unrelated external reminder emails.

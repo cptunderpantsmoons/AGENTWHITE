@@ -11,6 +11,8 @@ from sqlalchemy import func
 from core.database import SessionLocal, Document, DocumentVersion
 from core.database import Session as DbSession
 from src.auth_helpers import get_current_user
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -1508,11 +1510,11 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         from core.database import Signature
         # COMPOSE_UPLOADS_DIR lives in email_routes — re-derive here so we
         # don't import from a routes file (cycle-prone). Same env override
-        # as email_routes (ODYSSEUS_MAIL_ATTACHMENTS_DIR).
+        # as email_routes (WL_MAIL_ATTACHMENTS_DIR).
         from pathlib import Path as _Path
         import os as _os
         _DATA_DIR = _Path(__file__).resolve().parent.parent / "data"
-        _BASE = _os.environ.get("ODYSSEUS_MAIL_ATTACHMENTS_DIR", str(_DATA_DIR / "mail-attachments"))
+        _BASE = _os.environ.get("WL_MAIL_ATTACHMENTS_DIR", _os.environ.get("ODYSSEUS_MAIL_ATTACHMENTS_DIR", str(_DATA_DIR / "mail-attachments")))
         _COMPOSE_DIR = _Path(_BASE) / "_compose"
         _COMPOSE_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -34,6 +34,8 @@ from typing import Optional, List
 
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.secret_storage import decrypt as _decrypt
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -256,10 +258,10 @@ def _cleanup_compose_uploads(tokens) -> None:
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
-# Override at deploy time via ODYSSEUS_MAIL_ATTACHMENTS_DIR. Defaults to a
+# Override at deploy time via WL_MAIL_ATTACHMENTS_DIR or legacy ODYSSEUS_MAIL_ATTACHMENTS_DIR
 # subdir of the install's data/ tree so the app works out-of-the-box without
 # a hardcoded /home/<user>/ path.
-ATTACHMENTS_DIR = Path(os.environ.get("ODYSSEUS_MAIL_ATTACHMENTS_DIR", str(DATA_DIR / "mail-attachments")))
+ATTACHMENTS_DIR = Path(os.environ.get("WL_MAIL_ATTACHMENTS_DIR", os.environ.get("ODYSSEUS_MAIL_ATTACHMENTS_DIR", str(DATA_DIR / "mail-attachments"))))
 ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
 COMPOSE_UPLOADS_DIR = ATTACHMENTS_DIR / "_compose"
 COMPOSE_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -697,7 +699,7 @@ def _coerce_imap_timeout_seconds(raw: str | None) -> int:
     return max(5, min(value, 300))
 
 
-_IMAP_TIMEOUT_SECONDS = _coerce_imap_timeout_seconds(os.environ.get("ODYSSEUS_IMAP_TIMEOUT_SECONDS"))
+_IMAP_TIMEOUT_SECONDS = _coerce_imap_timeout_seconds(os.environ.get("WL_IMAP_TIMEOUT_SECONDS", os.environ.get("ODYSSEUS_IMAP_TIMEOUT_SECONDS")))
 
 
 def _open_imap_connection(host: str, port: int, *, starttls: bool, timeout: int = _IMAP_TIMEOUT_SECONDS):
@@ -1435,7 +1437,7 @@ class SendEmailRequest(BaseModel):
     attachments: Optional[List[str]] = None
     # Which account to send from. None = default account.
     account_id: Optional[str] = None
-    # Internal marker for Odysseus-generated mail (e.g. reminder, scheduled).
+    # Internal marker for app-generated mail (e.g. reminder, scheduled).
     odysseus_kind: Optional[str] = None
     # If true, /send waits for SMTP + Sent append and returns the sent UID.
     wait_for_delivery: bool = False

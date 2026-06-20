@@ -14,6 +14,8 @@ from core.database import SessionLocal, ScheduledTask, TaskRun
 from src.auth_helpers import get_current_user
 from src.task_scheduler import compute_next_run, HOUSEKEEPING_DEFAULTS
 from routes.prefs_routes import _load_for_user, _save_for_user
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ def _maybe_cascade_calendar_event(task) -> None:
     from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN
     headers = {INTERNAL_TOOL_HEADER: INTERNAL_TOOL_TOKEN}
     if task.owner:
-        headers["X-Odysseus-Owner"] = task.owner
+        headers[wl.header("Owner")] = task.owner
 
     # Strategy 1: explicit UID marker in prompt.
     event_uid = ""

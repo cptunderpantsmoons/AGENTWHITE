@@ -10,6 +10,8 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ def _format_mcp_connection_error(name: str, command: str = "", args: Optional[Li
             f"{raw_error}\n\n"
             "Browser MCP could not start. On fresh installs, cache the Playwright MCP package once before connecting:\n\n"
             "npx -y @playwright/mcp@latest --version\n\n"
-            "Then restart Odysseus and reconnect the Browser MCP server."
+            f"Then restart {wl.APP_NAME} and reconnect the Browser MCP server."
         )
 
     return raw_error

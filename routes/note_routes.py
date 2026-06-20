@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from core.database import SessionLocal, Note
 from src.auth_helpers import get_current_user
 from sqlalchemy.orm.attributes import flag_modified
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -332,11 +334,11 @@ async def dispatch_reminder(
                 msg["To"] = recipient
                 _t = title or 'Note'
                 _t = _t[len('Reminder:'):].strip() if _t.lower().startswith('reminder:') else _t
-                msg["Subject"] = f"Reminder (Odysseus): {_t}"
+                msg["Subject"] = f"Reminder ({wl.APP_SHORT_NAME}): {_t}"
                 msg["Date"] = _dt.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
-                msg["X-Odysseus-Origin"] = "odysseus-ui"
-                msg["X-Odysseus-Kind"] = "reminder"
-                msg["X-Odysseus-Ref"] = str(note_id)
+                msg[wl.header("Origin")] = wl.MAIL_ORIGIN
+                msg[wl.header("Kind")] = "reminder"
+                msg[wl.header("Ref")] = str(note_id)
                 # Body shape: synthesis (warm sentence) → blank line → bold
                 # title header → note details. The title was previously only
                 # in the subject line, so the email read like a faceless

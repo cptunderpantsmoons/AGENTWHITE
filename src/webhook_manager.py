@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+import src.white_label as wl
+
 from src.database import SessionLocal, Webhook
 
 logger = logging.getLogger(__name__)
@@ -197,7 +199,7 @@ class WebhookManager:
     async def deliver_test(self, webhook_id: str, url: str, encrypted_secret: Optional[str]):
         """Public method for the test-webhook route."""
         decrypted = self._decrypt_secret(encrypted_secret)
-        await self._deliver(webhook_id, url, decrypted, "webhook.test", {"message": "Test ping from Odysseus"})
+        await self._deliver(webhook_id, url, decrypted, "webhook.test", {"message": f"Test ping from {wl.APP_NAME}"})
 
     async def _deliver(self, webhook_id: str, url: str, secret: Optional[str], event: str, payload: dict):
         """Internal delivery. Never call directly from outside this class (use deliver_test)."""
@@ -211,12 +213,12 @@ class WebhookManager:
         body = json.dumps({"event": event, "timestamp": _utcnow().isoformat(), "data": payload})
         headers = {
             "Content-Type": "application/json",
-            "X-Odysseus-Event": event,
-            "User-Agent": "Odysseus-Webhook/1.0",
+            wl.header("Event"): event,
+            "User-Agent": wl.USER_AGENT,
         }
         if secret:
             sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-            headers["X-Odysseus-Signature"] = sig
+            headers[wl.header("Signature")] = sig
 
         db = SessionLocal()
         try:

@@ -10,6 +10,8 @@ import shlex
 
 from fastapi import HTTPException
 from pydantic import BaseModel
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +135,7 @@ def _shell_path(p: str) -> str:
 def _local_tooling_path_export(executable: str) -> str:
     """Bash line prepending the running interpreter's bin dir to PATH.
 
-    When Odysseus runs from a virtualenv, that bin dir holds the tools the
+    When the app runs from a virtualenv, that bin dir holds the tools the
     cookbook runners shell out to (`hf`, `python`). tmux runners start from a
     fresh login shell with the venv NOT activated, so without this they can't
     find `hf` and downloads fail with "hf: command not found" — notably on
@@ -244,7 +246,7 @@ def _venv_safe_local_pip_install_cmd(cmd: str, *, local: bool, in_venv: bool) ->
 
     Cookbook dependency installs run through the model-serve task path so users
     can watch progress in the same log UI. For local POSIX runs, that task
-    prepends Odysseus' own interpreter directory to PATH. If Odysseus itself is
+    prepends the app's own interpreter directory to PATH. If the app itself is
     running from a venv, `python3` resolves to the venv Python and pip rejects
     `--user` with "User site-packages are not visible in this virtualenv".
 
@@ -269,10 +271,10 @@ def _venv_safe_local_pip_install_cmd(cmd: str, *, local: bool, in_venv: bool) ->
 
 def _user_shell_path_bootstrap() -> list[str]:
     return [
-        'ODYSSEUS_USER_SHELL="${SHELL:-}"',
-        'if [ -n "$ODYSSEUS_USER_SHELL" ] && [ -x "$ODYSSEUS_USER_SHELL" ]; then',
-        '  ODYSSEUS_USER_PATH="$("$ODYSSEUS_USER_SHELL" -ic \'printf "__ODYSSEUS_PATH__%s\\n" "$PATH"\' 2>/dev/null | sed -n \'s/^__ODYSSEUS_PATH__//p\' | tail -n 1 || true)"',
-        '  if [ -n "$ODYSSEUS_USER_PATH" ]; then export PATH="$ODYSSEUS_USER_PATH:$PATH"; fi',
+        'APP_USER_SHELL="${SHELL:-}"',
+        'if [ -n "$APP_USER_SHELL" ] && [ -x "$APP_USER_SHELL" ]; then',
+        '  APP_USER_PATH="$("$APP_USER_SHELL" -ic \'printf "__APP_PATH__%s\\n" "$PATH"\' 2>/dev/null | sed -n \'s/^__APP_PATH__//p\' | tail -n 1 || true)"',
+        '  if [ -n "$APP_USER_PATH" ]; then export PATH="$APP_USER_PATH:$PATH"; fi',
         'fi',
         'command -v python3 >/dev/null 2>&1 || python3() { python "$@"; }',
     ]
@@ -472,7 +474,7 @@ def _ollama_bind_from_cmd(cmd: str | None, *, default_host: str = "127.0.0.1") -
     """Return the Ollama bind host/port requested by a serve command.
 
     Plain local `ollama serve` defaults to loopback. Remote callers can pass a
-    wider default host so the resulting API is reachable by Odysseus.
+    wider default host so the resulting API is reachable by the app.
     """
     if not cmd:
         return default_host, "11434"
@@ -567,8 +569,8 @@ def _validate_serve_cmd(v: str | None) -> str | None:
 
 def _append_serve_preflight_exit_lines(runner_lines: list[str], *, keep_shell_open: bool) -> None:
     """Append serve-runner lines that surface preflight failures before exit."""
-    runner_lines.append('if [ -n "$ODYSSEUS_PREFLIGHT_EXIT" ]; then')
-    runner_lines.append('  echo ""; echo "=== Process exited with code $ODYSSEUS_PREFLIGHT_EXIT ==="')
+    runner_lines.append('if [ -n "$APP_PREFLIGHT_EXIT" ]; then')
+    runner_lines.append('  echo ""; echo "=== Process exited with code $APP_PREFLIGHT_EXIT ==="')
     if keep_shell_open:
         # Decouple the post-crash interactive shell from the persistent log
         # file. fds 3/4 were saved BEFORE the tee redirect at the top of
@@ -579,23 +581,23 @@ def _append_serve_preflight_exit_lines(runner_lines: list[str], *, keep_shell_op
         runner_lines.append('  sleep 0.2  # let tee child flush + exit')
         runner_lines.append('  exec "${SHELL:-/bin/bash}"')
     else:
-        runner_lines.append('  exit "$ODYSSEUS_PREFLIGHT_EXIT"')
+        runner_lines.append('  exit "$APP_PREFLIGHT_EXIT"')
     runner_lines.append('fi')
 
 
 def _append_vllm_linux_preflight_lines(runner_lines: list[str]) -> None:
     """Append Linux vLLM readiness lines that identify the runtime being used."""
-    # Keep the user install bin visible for Odysseus-managed `pip install --user`
+    # Keep the user install bin visible for app-managed `pip install --user`
     # installs, but then report the actual CLI path so external runtimes are clear.
     runner_lines.append('export PATH="$HOME/.local/bin:$PATH"')
-    runner_lines.append('ODYSSEUS_VLLM_BIN="$(command -v vllm 2>/dev/null || true)"')
-    runner_lines.append('if [ -z "$ODYSSEUS_VLLM_BIN" ]; then')
+    runner_lines.append('APP_VLLM_BIN="$(command -v vllm 2>/dev/null || true)"')
+    runner_lines.append('if [ -z "$APP_VLLM_BIN" ]; then')
     runner_lines.append('  echo "ERROR: vLLM is not installed."')
-    runner_lines.append('  ODYSSEUS_PREFLIGHT_EXIT=127')
+    runner_lines.append('  APP_PREFLIGHT_EXIT=127')
     runner_lines.append('else')
-    runner_lines.append('  echo "[odysseus] vLLM CLI: $ODYSSEUS_VLLM_BIN"')
-    runner_lines.append('  ODYSSEUS_VLLM_VERSION="$("$ODYSSEUS_VLLM_BIN" --version 2>&1 | head -n 1 || true)"')
-    runner_lines.append('  if [ -n "$ODYSSEUS_VLLM_VERSION" ]; then echo "[odysseus] vLLM version: $ODYSSEUS_VLLM_VERSION"; fi')
+    runner_lines.append('  echo "[app] vLLM CLI: $APP_VLLM_BIN"')
+    runner_lines.append('  APP_VLLM_VERSION="$("$APP_VLLM_BIN" --version 2>&1 | head -n 1 || true)"')
+    runner_lines.append('  if [ -n "$APP_VLLM_VERSION" ]; then echo "[app] vLLM version: $APP_VLLM_VERSION"; fi')
     runner_lines.append('fi')
 
 def _append_serve_exit_code_lines(
@@ -605,18 +607,18 @@ def _append_serve_exit_code_lines(
     is_pip_install: bool = False,
 ) -> None:
     """Append serve-runner lines that preserve and report the command exit code."""
-    runner_lines.append('ODYSSEUS_CMD_EXIT=$?')
+    runner_lines.append('APP_CMD_EXIT=$?')
     if is_pip_install:
-        runner_lines.append('if [ $ODYSSEUS_CMD_EXIT -eq 0 ]; then echo ""; echo "DOWNLOAD_OK"; fi')
+        runner_lines.append('if [ $APP_CMD_EXIT -eq 0 ]; then echo ""; echo "DOWNLOAD_OK"; fi')
     if keep_shell_open:
-        runner_lines.append('echo ""; echo "=== Process exited with code $ODYSSEUS_CMD_EXIT ==="')
+        runner_lines.append('echo ""; echo "=== Process exited with code $APP_CMD_EXIT ==="')
         # See preflight branch above for the rationale on restoring fds 3/4.
         runner_lines.append('exec 1>&3 2>&4 3>&- 4>&- 2>/dev/null || true')
         runner_lines.append('sleep 0.2  # let tee child flush + exit')
         runner_lines.append('exec "${SHELL:-/bin/bash}"')
     else:
-        runner_lines.append('echo ""; echo "=== Process exited with code $ODYSSEUS_CMD_EXIT ==="')
-        runner_lines.append('exit "$ODYSSEUS_CMD_EXIT"')
+        runner_lines.append('echo ""; echo "=== Process exited with code $APP_CMD_EXIT ==="')
+        runner_lines.append('exit "$APP_CMD_EXIT"')
 
 
 def _append_llama_cpp_linux_accel_build_lines(runner_lines: list[str]) -> None:
@@ -641,7 +643,7 @@ def _append_llama_cpp_linux_accel_build_lines(runner_lines: list[str]) -> None:
     runner_lines.append('        export HIPCXX="${HIPCXX:-$(hipconfig -l)/clang}"')
     runner_lines.append('        export HIP_PATH="${HIP_PATH:-$(hipconfig -R)}"')
     runner_lines.append('      fi')
-    runner_lines.append('      echo "[odysseus] ROCm/HIP detected — building llama-server with HIP support..."')
+    runner_lines.append('      echo "[app] ROCm/HIP detected — building llama-server with HIP support..."')
     runner_lines.append('      cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_HIP=ON && cmake --build build -j"$NPROC" --target llama-server && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
     runner_lines.append('    elif command -v nvcc &>/dev/null; then')
     # nvcc alone is not sufficient — pip-installed CUDA wheels or incomplete
@@ -659,18 +661,18 @@ def _append_llama_cpp_linux_accel_build_lines(runner_lines: list[str]) -> None:
     runner_lines.append('        return 1')
     runner_lines.append('      }')
     runner_lines.append('      if _odysseus_has_cudart; then')
-    runner_lines.append('        echo "[odysseus] CUDA nvcc + cudart found — building llama-server with CUDA (GPU) support..."')
+    runner_lines.append('        echo "[app] CUDA nvcc + cudart found — building llama-server with CUDA (GPU) support..."')
     runner_lines.append('        cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON && cmake --build build -j"$NPROC" --target llama-server && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
     runner_lines.append('      else')
-    runner_lines.append('        echo "[odysseus] WARNING: nvcc found but CUDA runtime (libcudart.so) is not visible — building llama-server for CPU only."')
-    runner_lines.append('        echo "[odysseus]   GPU inference will not be available for this llama.cpp build."')
-    runner_lines.append('        echo "[odysseus]   Ensure libcudart is installed (e.g. cuda-runtime package) and visible via ldconfig or CUDA_HOME."')
+    runner_lines.append('        echo "[app] WARNING: nvcc found but CUDA runtime (libcudart.so) is not visible — building llama-server for CPU only."')
+    runner_lines.append('        echo "[app]   GPU inference will not be available for this llama.cpp build."')
+    runner_lines.append('        echo "[app]   Ensure libcudart is installed (e.g. cuda-runtime package) and visible via ldconfig or CUDA_HOME."')
     runner_lines.append('        cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"$NPROC" --target llama-server && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
     runner_lines.append('      fi')
     runner_lines.append('    else')
-    runner_lines.append('      echo "[odysseus] WARNING: no HIP/CUDA toolchain found — building llama-server for CPU only."')
-    runner_lines.append('      echo "[odysseus]   GPU inference will not be available for this llama.cpp build."')
-    runner_lines.append('      echo "[odysseus]   Install ROCm for AMD GPUs or vLLM/CUDA tooling for NVIDIA, then re-launch this serve task."')
+    runner_lines.append('      echo "[app] WARNING: no HIP/CUDA toolchain found — building llama-server for CPU only."')
+    runner_lines.append('      echo "[app]   GPU inference will not be available for this llama.cpp build."')
+    runner_lines.append('      echo "[app]   Install ROCm for AMD GPUs or vLLM/CUDA tooling for NVIDIA, then re-launch this serve task."')
     runner_lines.append('      cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"$NPROC" --target llama-server && ln -sf ~/llama.cpp/build/bin/llama-server ~/bin/llama-server')
     runner_lines.append('    fi')
 
@@ -689,7 +691,7 @@ def _llama_cpp_rebuild_cmd() -> str:
         'mkdir -p "$HOME/bin" && '
         'rm -f "$HOME/bin/llama-server" && '
         'rm -rf "$HOME/llama.cpp/build" && '
-        'echo "[odysseus] Cleared the cached llama.cpp build. '
+        'echo "[app] Cleared the cached llama.cpp build. '
         'Re-launch the serve task to rebuild llama-server from source '
         '(CUDA or HIP will be used if a toolchain is now available)."'
     )

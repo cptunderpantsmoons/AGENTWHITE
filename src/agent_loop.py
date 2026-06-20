@@ -20,6 +20,8 @@ from src.model_context import estimate_tokens
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
+import src.white_label as wl
+
 from src.agent_tools import (
     parse_tool_blocks,
     strip_tool_blocks,
@@ -34,6 +36,9 @@ from src.agent_tools import (
     ToolBlock,
     MAX_AGENT_ROUNDS,
 )
+
+# NEW: incremental tool scanner for mid-stream tool execution
+from src.tool_parsing import IncrementalToolScanner
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +139,7 @@ _API_AGENT_RULES = """\
 - Plain "list/show/check my inbox/emails" means latest inbox mail, including read messages. Do not set `unread_only: true` unless the user explicitly asks for unread/needs attention.
 - Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory or infer it is the same inbox. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and can falsely return empty.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
-- You are running INSIDE Odysseus — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
+- You are running INSIDE {{wl.APP_NAME}} — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
 - After `list_sessions`, preserve the returned `[Chat title](#session-<id>)` links in your user-facing reply. Do not rewrite chat lists as plain tables with non-clickable titles.
 - "Cookbook" = the LLM-serving subsystem (NOT chat sessions, NOT a recipe app). Routing:
   • "What's running" / "what's serving" / "show my cookbook" / "is anything up" → **first action MUST be `list_served_models` (no args)**. The tool is ALWAYS available. Do not run `ps aux`, do not `curl localhost:8000`, do not `which vllm`. Even if you don't remember seeing the tool listed, it IS available — call it. The output IS the source of truth (it tracks diffusion models, vLLM, SGLang, llama.cpp, Ollama, etc. — anything spawned via the cookbook, including remote hosts that `ps aux` here can't see).
@@ -183,7 +188,7 @@ For LONG-running commands (package installs, pip/npm, ffmpeg, model downloads, t
 #!bg
 pip install openai-whisper
 ```
-SANDBOX LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the Odysseus UI — no need to copy files out.
+SANDBOX LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the {{wl.APP_NAME}} UI — no need to copy files out.
 NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats real newlines and `\\n` arrives as literal backslash-n, which Python parses as a line-continuation error on line 1. To run multi-line code, either use the dedicated `python` tool block above, or save to a file first with a quoted HEREDOC (`cat > /tmp/x.py << 'EOF' ... EOF`) and then `python /tmp/x.py`.""",
 
     "python": """\
@@ -350,7 +355,7 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
 ```app_api
 {"action": "call", "method": "GET", "path": "/api/cookbook/gpus"}
 ```
-GENERIC LOOPBACK to ANY Odysseus internal endpoint. Use this whenever the user wants something the UI can do but there's NO named tool for it. Every UI button hits some /api/* endpoint — you can hit the same one. Auth is handled automatically.
+GENERIC LOOPBACK to ANY app internal endpoint. Use this whenever the user wants something the UI can do but there's NO named tool for it. Every UI button hits some /api/* endpoint — you can hit the same one. Auth is handled automatically.
 
 **Discovery first.** If you're not sure of the path, call `{"action":"endpoints","filter":"<keyword>"}` (e.g. filter='calendar' or 'gallery' or 'theme') to list available endpoints with their methods + summaries. Then call with action='call'.
 
@@ -471,7 +476,7 @@ _API_HOSTS = frozenset([
     "api.together.xyz", "api.fireworks.ai",
     "api.perplexity.ai", "api.x.ai",
     "ollama.com", "api.venice.ai",
-    "api.githubcopilot.com",
+    "api.githubcopilot.com", "api.z.ai",
     # Local OpenAI-compatible endpoints (llama.cpp, vLLM, LM Studio, etc.).
     # Without these, `_is_api_model` falls back to keyword sniffing on the
     # model name, so well-behaved local servers don't get native tool
@@ -1580,7 +1585,7 @@ async def stream_agent_loop(
         # via vLLM's `--enable-auto-tool-choice`. Belt-and-suspenders
         # with the per-endpoint flag above.
         "minimax", "kimi", "yi-", "phi-3", "phi-4", "command-r",
-        "glm-4", "internlm", "hermes",
+        "glm-4", "glm-5", "internlm", "hermes",
         # deepseek-v2/v3/chat support tools via the cloud API; deepseek-r1
         # (reasoning model) does not — handled by the blocklist below.
         "deepseek-v", "deepseek-chat",
@@ -1789,6 +1794,9 @@ async def stream_agent_loop(
         _doc_opened = False
         _doc_last_len = 0
         _doc_fence_offset = 0  # offset into round_response for text-fence content
+        # NEW: incremental tool scanner for mid-stream tool detection
+        _tool_scanner = IncrementalToolScanner()
+        _midstream_tools = []  # list of (block, desc, result) tuples
         # Cursor for the multi-block scanner — when a `create_document`
         # fenced block closes we advance this so the next iteration can
         # detect a SUBSEQUENT block in the same round.
@@ -1940,6 +1948,25 @@ async def stream_agent_loop(
                         else:
                             round_response += data["delta"]
                             full_response += data["delta"]
+                            # NEW: incremental tool scanner — detect and execute
+                            # tool blocks as they complete mid-stream, rather than
+                            # waiting for the round to end.
+                            for ev in _tool_scanner.feed(data["delta"]):
+                                if ev[0] == "tool_closed":
+                                    tool_type, content = ev[1], ev[2]
+                                    _tb = ToolBlock(tool_type, content)
+                                    # Emit tool start
+                                    yield f'data: {json.dumps({"type": "tool_start", "tool": tool_type})}\n\n'
+                                    # Execute immediately
+                                    _desc, _result = await execute_tool_block(
+                                        _tb, session_id=session_id, disabled_tools=disabled_tools,
+                                        owner=owner, workspace=workspace,
+                                    )
+                                    _result_text = format_tool_result(_result)
+                                    _midstream_tools.append((_tb, _desc, _result))
+                                    # Emit tool output
+                                    yield f'data: {json.dumps({"type": "tool_output", "tool": tool_type, "output": _result_text})}\n\n'
+                                    _effectful_used = True
                         yield chunk  # Stream all rounds
                         # Detect text-fence doc streaming for rounds 2+
                         # (round 1 is handled by frontend fence detection + server fenced block path)
@@ -1996,6 +2023,50 @@ async def stream_agent_loop(
             # Intercept [DONE] — don't forward until all rounds finish
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
+
+        # NEW: finalize incremental scanner — catch partial/malformed fences
+        # that _resolve_tool_blocks() may have missed (e.g. unclosed ```bash)
+        _partial_events = _tool_scanner.finalize()
+        for ev in _partial_events:
+            if ev[0] == "tool_closed":
+                # Complete fence that wasn't picked up by _resolve_tool_blocks()
+                # (may happen with edge-case formatting)
+                _tb = ToolBlock(ev[1], ev[2])
+                _midstream_tools.append((_tb, None, None))
+            elif ev[0] == "tool_partial":
+                # Unclosed fence — model started a tool but never finished
+                tool_type, content = ev[1], ev[2]
+                logger.warning(f"[agent] partial tool fence detected: {tool_type}, content={content[:80]!r}")
+                # Don't execute partial fences — the intent-without-action
+                # supervisor (lines 2125+) will nudge the model if needed
+
+        # Deduplicate tool_blocks against mid-stream tools that were already
+        # executed. Build signature set for O(1) lookup.
+        _midstream_sigs = {
+            (_m[0].tool_type, _m[0].content.strip())
+            for _m in _midstream_tools
+            if _m[1] is not None  # only dedup against actually-executed tools
+        }
+        if _midstream_sigs:
+            _before = len(tool_blocks)
+            tool_blocks = [
+                _b for _b in tool_blocks
+                if (_b.tool_type, _b.content.strip()) not in _midstream_sigs
+            ]
+            if len(tool_blocks) < _before:
+                logger.info(f"[agent] deduped {_before - len(tool_blocks)} tool block(s) already executed mid-stream")
+
+        # Add mid-stream results to the result lists so they are included in
+        # the message history for the next round via _append_tool_results().
+        tool_results = []
+        tool_result_texts = []
+        for _m_block, _m_desc, _m_result in _midstream_tools:
+            if _m_result is not None:
+                tool_results.append(_m_result)
+                tool_result_texts.append(format_tool_result(_m_result))
+            else:
+                # Fence was detected but not executed — treat as unexecuted
+                pass
 
         # Force-answer round: we told the model to STOP calling tools and
         # answer. If it ignored that and emitted a (possibly DSML) tool
@@ -2249,8 +2320,8 @@ async def stream_agent_loop(
                     break
 
         # Execute each tool block
-        tool_results = []
-        tool_result_texts = []  # plain text for native tool role messages
+        # (tool_results and tool_result_texts were initialized earlier
+        # with mid-stream results already appended)
         budget_hit = False
         for i, block in enumerate(tool_blocks):
             # --- Tool budget check ---

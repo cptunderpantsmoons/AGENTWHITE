@@ -10,6 +10,7 @@ import os
 from core.auth import AuthManager
 from src.rate_limiter import RateLimiter
 from src.settings_scrub import scrub_settings
+import src.white_label as wl
 from src.settings import (
     load_settings as _load_settings,
     save_settings as _save_settings,
@@ -548,7 +549,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             api_key = integ.get("api_key", "")
             auth_type = (integ.get("auth_type") or "none").lower()
             headers = {
-                "Title": "Odysseus connectivity test",
+                "Title": "{wl.APP_NAME} connectivity test",
                 "Tags": "white_check_mark",
                 "Priority": "default",
             }
@@ -561,7 +562,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 async with httpx.AsyncClient(timeout=8.0) as client:
                     r = await client.post(
                         full_url,
-                        content="Connectivity test from Odysseus. If you see this on your phone, ntfy is wired up correctly.",
+                        content="Connectivity test from the app. If you see this on your phone, ntfy is wired up correctly.",
                         headers=headers,
                     )
                 if r.is_success:
@@ -592,7 +593,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 return {"ok": False, "message": "No webhook URL set — paste the full Discord webhook URL into the Base URL field."}
             payload = {
                 "embeds": [{
-                    "title": "Odysseus connectivity test",
+                    "title": "{wl.APP_NAME} connectivity test",
                     "description": "If you see this, your Discord Webhook integration is wired up correctly.",
                     "color": 5793266,
                 }]

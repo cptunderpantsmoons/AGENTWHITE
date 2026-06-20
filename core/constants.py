@@ -1,13 +1,17 @@
-# src/constants.py
+# core/constants.py
 """Application-wide constants and configuration values."""
 import os
 
-APP_VERSION = "0.9.1"
+import src.white_label as wl
+
+APP_VERSION = wl.APP_VERSION
 
 # Base paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-DATA_DIR = os.path.join(BASE_DIR, "data")
+# Allow the Electron / portable launcher to relocate the writable data
+# directory (e.g. next to the executable on a USB drive).
+DATA_DIR = os.path.abspath(os.getenv("ODYSSEUS_DATA_DIR") or os.path.join(BASE_DIR, "data"))
 
 # Data file paths
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
@@ -31,9 +35,20 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SEARXNG_INSTANCE = os.getenv('SEARXNG_INSTANCE', 'http://localhost:8080')
 
 
+def _env(name: str, default: str = "", legacy: str | None = None) -> str:
+    val = os.getenv(name)
+    if val is None and legacy:
+        val = os.getenv(legacy, default)
+    return val if val is not None else default
+
+
+def _env_int(name: str, default: int = 0, legacy: str | None = None) -> int:
+    return int(_env(name, str(default), legacy=legacy))
+
+
 # Cleanup configuration
-CLEANUP_ENABLED = os.getenv("CLEANUP_ENABLED", "True").lower() == "true"
-CLEANUP_INTERVAL_HOURS = int(os.getenv("CLEANUP_INTERVAL_HOURS", "24"))
+CLEANUP_ENABLED = _env("CLEANUP_ENABLED", "True", legacy="CLEANUP_ENABLED").lower() == "true"
+CLEANUP_INTERVAL_HOURS = _env_int("CLEANUP_INTERVAL_HOURS", 24, legacy="CLEANUP_INTERVAL_HOURS")
 
 # Default parameters
 DEFAULT_TEMPERATURE = 1.0

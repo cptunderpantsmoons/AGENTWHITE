@@ -1,0 +1,24 @@
+# Local-only / large / secret artifacts to exclude from server upload
+.git
+.venv
+venv
+node_modules
+__pycache__
+.pytest_cache
+dist
+electron
+dist-electron
+logs
+data
+.env
+.env.local
+.env.*.local
+*.pyc
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+screenshot*.png
+*.dmg
+*.app

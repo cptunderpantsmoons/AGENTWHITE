@@ -15,6 +15,8 @@ from typing import Optional, Dict, Any, List
 import bcrypt
 import pyotp
 
+import src.white_label as wl
+
 logger = logging.getLogger(__name__)
 
 
@@ -370,7 +372,7 @@ class AuthManager:
     def totp_get_provisioning_uri(self, username: str, secret: str) -> str:
         """Get the otpauth:// URI for QR code generation."""
         totp = pyotp.TOTP(secret)
-        return totp.provisioning_uri(name=username, issuer_name="Odysseus")
+        return totp.provisioning_uri(name=username, issuer_name=wl.APP_SHORT_NAME)
 
     def totp_confirm_enable(self, username: str, code: str) -> bool:
         """Verify a TOTP code against the pending secret, then enable 2FA."""

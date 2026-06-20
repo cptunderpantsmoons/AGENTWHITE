@@ -14,6 +14,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from src.endpoint_resolver import resolve_endpoint
 from src.auth_helpers import _auth_disabled, get_current_user
+import src.white_label as wl
+
 
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9-]{1,128}$")
 
@@ -351,7 +353,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         from src.auth_helpers import require_privilege
         user = require_privilege(request, "can_use_research")
         if user == "internal-tool":
-            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            tool_owner = (request.headers.get(wl.header("Owner")) or "").strip()
             if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
                 auth_mgr = getattr(request.app.state, "auth_manager", None)
                 if auth_mgr is not None and getattr(auth_mgr, "is_configured", False):

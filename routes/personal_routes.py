@@ -11,6 +11,8 @@ from src.rag_singleton import get_rag_manager
 from src.auth_helpers import get_current_user, require_user
 from core.middleware import require_admin
 from src.upload_handler import secure_filename
+import src.white_label as wl
+
 
 UPLOADS_DIR = os.path.join(BASE_DIR, "data", "personal_uploads")
 MAX_PERSONAL_UPLOAD_BYTES = int(

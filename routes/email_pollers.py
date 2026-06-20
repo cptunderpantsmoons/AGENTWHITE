@@ -31,6 +31,8 @@ from email.mime.multipart import MIMEMultipart
 
 from src.llm_core import llm_call_async
 
+import src.white_label as wl
+
 from routes.email_helpers import (
     _strip_think, _extract_reply, _apply_email_style_mechanics, _load_settings, _save_settings, _get_email_config,
     _send_smtp_message,
@@ -765,7 +767,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                                     cfg = _get_email_config(account_id, owner=account_owner)
                                     to_addr = cfg["from_address"]  # self-email
 
-                                    # Deep-link to open the original email in Odysseus (if public URL is configured).
+                                    # Deep-link to open the original email in the app (if public URL is configured).
                                     # Hash format `#email=FOLDER:UID` is handled by static/js/emailInbox.js:_maybeOpenFromHash.
                                     from src.settings import load_settings as _ls
                                     _pub = (_ls().get("app_public_url") or "").rstrip("/")
@@ -777,7 +779,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                                     alert_body = (
                                         f"Your AI assistant flagged this email as {urgency.upper()} urgency.\n\n"
                                         f"Reason: {reason}\n\n"
-                                        + (f"Open in Odysseus: {open_url}\n\n" if open_url else "")
+                                        + (f"Open in app: {open_url}\n\n" if open_url else "")
                                         + f"---\n"
                                         f"From: {sender}\n"
                                         f"Subject: {subject}\n"
@@ -785,14 +787,14 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                                         f"{body[:800]}"
                                         + ("..." if len(body or "") > 800 else "")
                                     )
-                                    # HTML alternative with a clickable "Open in Odysseus" button
+                                    # HTML alternative with a clickable "Open in app" button
                                     import html as _h
                                     body_excerpt = _h.escape((body or "")[:800])
                                     open_html = (
                                         f'<p><a href="{_h.escape(open_url)}" '
                                         'style="display:inline-block;padding:8px 14px;background:#50fa7b;'
                                         'color:#000;text-decoration:none;border-radius:4px;font-weight:bold">'
-                                        'Open in Odysseus</a></p>'
+                                        'Open in app</a></p>'
                                     ) if open_url else ""
                                     alert_html = (
                                         f'<div style="font-family:system-ui,sans-serif;max-width:640px">'
@@ -1021,9 +1023,9 @@ def _scheduled_poll_once() -> dict:
                     outer["Cc"] = r[2]
                 outer["Subject"] = r[4] or ""
                 outer["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
-                outer["X-Odysseus-Origin"] = "odysseus-ui"
-                outer["X-Odysseus-Kind"] = re.sub(r"[^A-Za-z0-9_.-]", "-", odysseus_kind or "scheduled")[:64]
-                outer["X-Odysseus-Ref"] = sid
+                outer[wl.header("Origin")] = wl.MAIL_ORIGIN
+                outer[wl.header("Kind")] = re.sub(r"[^A-Za-z0-9_.-]", "-", odysseus_kind or "scheduled")[:64]
+                outer[wl.header("Ref")] = sid
                 if r[6]:
                     outer["In-Reply-To"] = r[6]
                 if r[7]:
@@ -1090,13 +1092,12 @@ _poller_task = None
 _summarize_task = None
 
 def _inprocess_pollers_enabled() -> bool:
-    """Honour `ODYSSEUS_INPROCESS_POLLERS` — set to `0`/`false`/`no`/`off`
-    to disable the asyncio tasks so a cron / systemd-timer setup driving
-    `odysseus-mail poll-scheduled` is the sole external driver. The legacy
-    auto-summary/reply poller no longer starts here; scheduled Tasks own that
-    work so Email settings are only feature gates, not a second scheduler."""
+    """Honour `WL_INPROCESS_POLLERS` (or legacy `ODYSSEUS_INPROCESS_POLLERS`).
+    Set to `0`/`false`/`no`/`off` to disable the asyncio tasks so a cron /
+    systemd-timer setup driving `odysseus-mail poll-scheduled` is the sole
+    external driver."""
     import os
-    raw = os.environ.get("ODYSSEUS_INPROCESS_POLLERS", "1").strip().lower()
+    raw = os.environ.get("WL_INPROCESS_POLLERS", os.environ.get("ODYSSEUS_INPROCESS_POLLERS", "1")).strip().lower()
     return raw not in ("0", "false", "no", "off", "")
 
 
@@ -1104,12 +1105,12 @@ def _start_poller():
     """Start background pollers. Called at module load; if no event loop is
     running yet (common at import time), defer via a first-request hook.
 
-    Skipped entirely when `ODYSSEUS_INPROCESS_POLLERS=0` — use that when
+    Skipped entirely when polling is disabled — use that when
     you're driving polling from cron / systemd to avoid two copies of
     `_scheduled_poll_once` racing on the same SQLite."""
     if not _inprocess_pollers_enabled():
         logger.info(
-            "In-process email pollers disabled (ODYSSEUS_INPROCESS_POLLERS=0); "
+            "In-process email pollers disabled; "
             "drive `odysseus-mail poll-scheduled` externally."
         )
         return

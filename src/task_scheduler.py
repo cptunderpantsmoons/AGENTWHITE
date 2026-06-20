@@ -8,6 +8,8 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Tuple
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -1544,9 +1546,9 @@ class TaskScheduler:
             msg["From"] = from_addr
             msg["To"] = to_addr
             msg["Subject"] = f"[Task] {task.name}"
-            msg["X-Odysseus-Origin"] = "odysseus-ui"
-            msg["X-Odysseus-Kind"] = "task"
-            msg["X-Odysseus-Ref"] = str(task.id)
+            msg[wl.header("Origin")] = wl.MAIL_ORIGIN
+            msg[wl.header("Kind")] = "task"
+            msg[wl.header("Ref")] = str(task.id)
             msg.set_content(result or "")
             _send_smtp_message(cfg, from_addr, [to_addr], msg.as_string(), timeout=30)
             logger.info("Task %s emailed result to %s (%sb)", task.id, to_addr, len(result or ""))
@@ -1855,9 +1857,9 @@ class TaskScheduler:
             "subject": f"[Task] {task.name}",
             "body": result,
             "headers": {
-                "X-Odysseus-Origin": "odysseus-ui",
-                "X-Odysseus-Kind": "task",
-                "X-Odysseus-Ref": str(task.id),
+                wl.header("Origin"): wl.MAIL_ORIGIN,
+                wl.header("Kind"): "task",
+                wl.header("Ref"): str(task.id),
             },
         }
         if recipient:

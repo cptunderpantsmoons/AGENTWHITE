@@ -48,22 +48,8 @@ _BLOCKED_HOSTS = {
 
 
 def _private_caldav_allowed() -> bool:
-    return os.environ.get("ODYSSEUS_ALLOW_PRIVATE_CALDAV", "0").lower() in {"1", "true", "yes"}
-
-
-def _validate_caldav_address(addr: ipaddress._BaseAddress) -> None:
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        addr = addr.ipv4_mapped
-    if (
-        addr.is_loopback
-        or addr.is_link_local
-        or addr.is_multicast
-        or addr.is_unspecified
-        or addr.is_reserved
-    ):
-        raise ValueError("CalDAV URL host is not allowed")
-    if addr.is_private and not _private_caldav_allowed():
-        raise ValueError("Private CalDAV IPs require ODYSSEUS_ALLOW_PRIVATE_CALDAV=1")
+    """Check whether CalDAV sync to private IPs is allowed."""
+    return os.environ.get("WL_ALLOW_PRIVATE_CALDAV", os.environ.get("ODYSSEUS_ALLOW_PRIVATE_CALDAV", "0")).lower() in {"1", "true", "yes"}
 
 
 def _validate_caldav_ip(host: str) -> None:

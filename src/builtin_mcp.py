@@ -12,6 +12,8 @@ import sys
 import asyncio
 
 from core.platform_compat import IS_WINDOWS, which_tool
+import src.white_label as wl
+
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +69,13 @@ def _find_npx() -> str:
 # carries hundreds of LOC of unique IMAP / HTTP / manager logic not worth
 # duplicating into the native path right now.
 _BUILTIN_SERVERS = {
-    "image_gen":  ("mcp_servers/image_gen_server.py",  "Built-in: Image Generation"),
-    "memory":     ("mcp_servers/memory_server.py",     "Built-in: Memory"),
-    "rag":        ("mcp_servers/rag_server.py",        "Built-in: RAG"),
-    "email":      ("mcp_servers/email_server.py",      "Built-in: Email"),
+    "image_gen":    ("mcp_servers/image_gen_server.py",      "Built-in: Image Generation"),
+    "memory":       ("mcp_servers/memory_server.py",         "Built-in: Memory"),
+    "rag":          ("mcp_servers/rag_server.py",            "Built-in: RAG"),
+    "email":        ("mcp_servers/email_server.py",          "Built-in: Email"),
+    "web_use":      ("mcp_servers/web_use_server.py",        "Built-in: Web Browser Agent"),
+    "windows_use":  ("mcp_servers/windows_use_server.py",    "Built-in: Windows Desktop Agent"),
+    "operator_use": ("mcp_servers/operator_use_server.py",   "Built-in: Multi-Agent Operator"),
 }
 
 # NPX-based built-in servers (run via npx, not Python)
@@ -83,13 +88,13 @@ _BUILTIN_NPX_SERVERS = {
 }
 
 # Global flag to disable MCP if there are compatibility issues
-MCP_DISABLED = os.environ.get("ODYSSEUS_DISABLE_MCP", "").lower() in ("1", "true", "yes")
+MCP_DISABLED = os.environ.get("WL_DISABLE_MCP", os.environ.get("ODYSSEUS_DISABLE_MCP", "")).lower() in ("1", "true", "yes")
 
 
 async def register_builtin_servers(mcp_manager):
     """Connect all built-in MCP servers to the manager."""
     if MCP_DISABLED:
-        logger.info("Built-in MCP servers disabled via ODYSSEUS_DISABLE_MCP")
+        logger.info("Built-in MCP servers disabled via WL_DISABLE_MCP (or legacy ODYSSEUS_DISABLE_MCP)")
         return
 
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -148,7 +153,7 @@ async def register_builtin_servers(mcp_manager):
                     f"  Reason: npm package {pkg_spec!r} is not installed in the npx cache.\n"
                     f"  Impact: tools provided by this MCP server will be unavailable.\n"
                     f"  Fix:    {os.path.basename(npx_path)} -y {pkg_spec} --version\n"
-                    f"          (run once, then restart Odysseus)\n"
+                    f"          (run once, then restart {wl.APP_NAME})\n"
                     f"  Notes:  this server is optional; see README.md "
                     f"'Built-in MCP servers' for details."
                 )

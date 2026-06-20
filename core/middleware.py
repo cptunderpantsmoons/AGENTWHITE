@@ -1,4 +1,4 @@
-# src/middleware.py
+# core/middleware.py
 # Shared middleware, decorators, and request helpers
 
 import os
@@ -8,13 +8,15 @@ from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+import src.white_label as wl
+
 
 # Per-process token that lets the in-app tool layer hit admin-gated
 # routes via HTTP loopback (the agent's tool calls don't carry the
 # admin user's session cookie). Set once at import; tools read the
 # same value from this module. Never persisted or exposed externally.
-INTERNAL_TOOL_TOKEN = os.environ.get("ODYSSEUS_INTERNAL_TOKEN") or secrets.token_hex(32)
-INTERNAL_TOOL_HEADER = "X-Odysseus-Internal-Token"
+INTERNAL_TOOL_TOKEN = os.environ.get("WL_INTERNAL_TOKEN") or os.environ.get("ODYSSEUS_INTERNAL_TOKEN") or secrets.token_hex(32)
+INTERNAL_TOOL_HEADER = wl.internal_header("Token")
 
 
 def require_admin(request: Request):

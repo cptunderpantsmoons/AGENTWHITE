@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
+import src.white_label as wl
+
 
 
 @dataclass
@@ -31,7 +33,7 @@ class MemorySearchHit:
 
 
 class MemoryProvider(ABC):
-    """Base contract for Odysseus memory providers.
+    """Base contract for memory providers.
 
     The native memory provider should always be available. External providers
     can add recall/write behavior and their own tools without replacing the
@@ -94,10 +96,10 @@ class MemoryProvider(ABC):
 
 
 class NativeMemoryProvider(MemoryProvider):
-    """Provider adapter for Odysseus' built-in memory manager and vector store."""
+    """Provider adapter for the built-in memory manager and vector store."""
 
     provider_id = "native"
-    display_name = "Odysseus native memory"
+    display_name = f"{wl.APP_SHORT_NAME} native memory"
 
     _CORE_FIELDS = {
         "id",

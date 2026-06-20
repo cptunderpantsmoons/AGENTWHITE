@@ -1,0 +1,49 @@
+appId: com.carbon-agent.desktop
+productName: "CarbonAgent"
+copyright: Copyright © 2024
+directories:
+  output: dist
+  buildResources: electron/assets
+files:
+  - electron/**/*
+  - app.py
+  - setup.py
+  - requirements.txt
+  - static/**/*
+  - routes/**/*
+  - src/**/*
+  - core/**/*
+  - services/**/*
+  - mcp_servers/**/*
+  - "!**/.git/**"
+  - "!**/__pycache__/**"
+  - "!**/node_modules/**"
+  - "!**/.venv/**"
+  - "!**/data/**"
+  - "!**/.learnings/**"
+  - "!**/*.pyc"
+extraResources:
+  - from: build/python
+    to: python
+    filter:
+      - "**/*"
+asar: true
+asarUnpack:
+  - "**/*.py"
+  - "**/*.html"
+  - "**/*.css"
+win:
+  target:
+    - nsis
+    - zip
+    - portable
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "CarbonAgent"
+portable:
+  artifactName: "${productName}-Portable-${version}-${arch}.${ext}"

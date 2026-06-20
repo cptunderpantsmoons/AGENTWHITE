@@ -8,7 +8,7 @@ Supports fenced code blocks, [TOOL_CALL] blocks, and XML-style <invoke> blocks.
 import re
 import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from src.agent_tools import ToolBlock, TOOL_TAGS
 
@@ -68,6 +68,85 @@ _TOOL_CODE_RE = re.compile(
 # never show the garbage to the user). The pipe run is tolerant of
 # fullwidth (U+FF5C) and ascii '|' in any count.
 _DSML_PIPES = r"[｜|]+"
+
+# Pattern 6: functions.<name>:<id> { ... } blocks emitted as plain text
+# by some OpenAI-compatible proxies and custom endpoints (e.g. umans-*)
+# instead of native tool_calls events.  We extract the JSON object and
+# route it through the same converter as native function calls.
+_FUNCTIONS_CALL_RE = re.compile(r"functions\.\w+:\d+", re.IGNORECASE)
+
+
+def _extract_balanced_json(text: str, start: int) -> Tuple[Optional[str], int]:
+    """Extract a balanced JSON object starting at text[start] == '{'.
+
+    Returns (json_string, index_after_object) or (None, start) if the
+    object is unbalanced or not an object at all.
+    """
+    if start >= len(text) or text[start] != "{":
+        return None, start
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1], i + 1
+    return None, start
+
+
+def _find_functions_tool_call_spans(text: str) -> List[Tuple[int, int, "ToolBlock"]]:
+    """Find complete functions.<name>:<id> { ... } tool calls in *text*.
+
+    Returns a list of ``(start, end, ToolBlock)`` tuples.  Only complete,
+    valid calls are returned; partial or malformed calls are ignored so
+    streaming scanners can keep accumulating text.
+    """
+    spans: List[Tuple[int, int, "ToolBlock"]] = []
+    start = 0
+    while True:
+        pos = text.find("functions.", start)
+        if pos < 0:
+            break
+        m = re.match(r"functions\.(\w+):(\d+)", text[pos:], re.IGNORECASE)
+        if not m:
+            start = pos + 1
+            continue
+        name = m.group(1)
+        after_id = pos + m.end()
+        ws_end = after_id
+        while ws_end < len(text) and text[ws_end] in " \t":
+            ws_end += 1
+        if ws_end >= len(text) or text[ws_end] != "{":
+            start = pos + 1
+            continue
+        json_str, end_pos = _extract_balanced_json(text, ws_end)
+        if json_str is None:
+            start = pos + 1
+            continue
+        # Local import avoids a circular import at module load.
+        from src.tool_schemas import function_call_to_tool_block
+        block = function_call_to_tool_block(name, json_str)
+        if block:
+            spans.append((pos, end_pos, block))
+        start = end_pos
+    return spans
+
+
 def _normalize_dsml(text: str) -> str:
     if not isinstance(text, str):
         return ""
@@ -329,17 +408,44 @@ def _parse_tool_code_block(raw: str) -> Optional[ToolBlock]:
     return None
 
 
+def _normalize_tool_fences(text: str) -> str:
+    """Normalize multiline fence openers to inline format.
+
+    Converts this (some models emit it):
+        ```
+        bash
+        content
+        ```
+    To this:
+        ```bash
+        content
+        ```
+    """
+    for tag in TOOL_TAGS:
+        pattern = re.compile(
+            rf"(```)[ \t]*(?:\r?\n)[ \t]*({re.escape(tag)})(?:\r?\n)",
+            re.IGNORECASE,
+        )
+        text = pattern.sub(rf"\1\2\n", text)
+    return text
+
+
 def parse_tool_blocks(text: str) -> List[ToolBlock]:
     """Extract executable tool blocks from LLM response text.
 
     Supports multiple formats:
-    1. ```bash ... ``` fenced code blocks (standard)
+    1. `` `bash ... `` ` fenced code blocks (standard)
     2. [TOOL_CALL] ... [/TOOL_CALL] blocks (some models)
     3. XML-style <tool_call>/<invoke> blocks
     4. <tool_code> blocks (MiniMax-M2.5 style)
     5. DeepSeek DSML markup (normalized to <invoke> first)
+    6. functions.<name>:<id> { ... } native-style calls emitted as text
+       by some OpenAI-compatible proxies / custom endpoints
     """
     blocks = []
+
+    # Normalize multiline fence openers before parsing
+    text = _normalize_tool_fences(text)
 
     # Normalize DeepSeek DSML markup into standard <invoke> form so the
     # XML patterns below catch it.
@@ -394,7 +500,88 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
             if block:
                 blocks.append(block)
 
+    # Pattern 6: functions.<name>:<id> { ... } native-style calls emitted as text
+    for _start, _end, block in _find_functions_tool_call_spans(text):
+        blocks.append(block)
+
     return blocks
+
+
+class IncrementalToolScanner:
+    """
+    Scans streaming text for `` `tool_name `` blocks as they arrive.
+    Extracts complete fenced tool blocks from the accumulated buffer and
+    emits 'tool_closed' events immediately.  Only 'finalize()' returns
+    partial (unclosed) fences.
+    """
+
+    def __init__(self):
+        self.buffer = ""
+
+    def feed(self, chunk: str) -> List[tuple]:
+        """
+        Feed a text chunk. Returns list of ('tool_closed', tool_type, content)
+        tuples for every complete tool block detected in the buffer so far.
+        """
+        events = []
+        self.buffer += chunk
+
+        # Repeatedly scan the buffer for complete fenced tool blocks.
+        # _TOOL_BLOCK_RE requires both opening and closing fences, so a match
+        # here means the block is COMPLETE and can be executed immediately.
+        while True:
+            match = _TOOL_BLOCK_RE.search(self.buffer)
+            if not match:
+                break
+            tool_type = match.group(1).lower()
+            if tool_type in TOOL_TAGS:
+                content = match.group(2)
+                events.append(("tool_closed", tool_type, content))
+                # Strip the matched block from buffer so subsequent passes
+                # can find additional blocks in the same chunk.
+                self.buffer = self.buffer[:match.start()] + self.buffer[match.end():]
+            else:
+                # Not a recognized tool tag — advance past the opening backticks
+                # to avoid matching the same spot forever.
+                backtick_pos = self.buffer.find("```")
+                if backtick_pos >= 0:
+                    self.buffer = self.buffer[backtick_pos + 3:]
+                else:
+                    break
+
+        # Pattern 6: functions.<name>:<id> { ... } native-style calls emitted as text
+        while True:
+            spans = _find_functions_tool_call_spans(self.buffer)
+            if not spans:
+                break
+            for start, end, block in spans:
+                events.append(("tool_closed", block.tool_type, block.content))
+            # Remove matched spans in reverse order so indices stay valid.
+            for start, end, _block in reversed(spans):
+                self.buffer = self.buffer[:start] + self.buffer[end:]
+
+        return events
+
+    def finalize(self) -> List[tuple]:
+        """
+        Call when the stream ends. Returns any partial tool blocks
+        (fences that were opened but never closed). Resets the scanner.
+        """
+        events = []
+        # Look for a tool-name opener without a closing fence
+        partial_match = re.search(
+            r"```(" + "|".join(TOOL_TAGS) + r")\s*\n",
+            self.buffer,
+            re.IGNORECASE,
+        )
+        if partial_match:
+            tool_type = partial_match.group(1).lower()
+            # Content is everything after the fence opener line
+            content_start = partial_match.end()
+            content = self.buffer[content_start:]
+            events.append(("tool_partial", tool_type, content))
+        self.buffer = ""
+        return events
 
 
 def strip_tool_blocks(text: str) -> str:
@@ -408,5 +595,8 @@ def strip_tool_blocks(text: str) -> str:
     cleaned = _TOOL_CODE_RE.sub('', cleaned)
     # Strip bare <invoke> blocks not wrapped in <tool_call>
     cleaned = re.sub(r'<invoke\s+name=["\'].*?</invoke>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    # Strip functions.<name>:<id> { ... } native-style calls emitted as text
+    for start, end, _block in reversed(_find_functions_tool_call_spans(cleaned)):
+        cleaned = cleaned[:start] + cleaned[end:]
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()

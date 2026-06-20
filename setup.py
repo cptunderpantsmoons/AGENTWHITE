@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Odysseus — first-time setup script.
+"""First-time setup script.
 
 Creates data directories, initializes the database, and sets up an
 initial admin user. Safe to re-run (skips what already exists).
@@ -8,6 +8,8 @@ initial admin user. Safe to re-run (skips what already exists).
 import os
 import shutil
 import sys
+
+import src.white_label as wl
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -168,7 +170,7 @@ def check_deps():
 
 
 def main():
-    print("\n=== Odysseus Setup ===\n")
+    print(f"\n=== {wl.APP_NAME} Setup ===\n")
 
     print("1. Creating directories...")
     create_dirs()
