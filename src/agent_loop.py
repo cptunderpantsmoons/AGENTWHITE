@@ -1493,6 +1493,32 @@ def _compute_skill_disabled(
     return skill_disabled
 
 
+def _compute_skill_gen_overrides(
+    active_skills: Optional[List[ResolvedSkill]],
+) -> tuple[Optional[float], Optional[int]]:
+    """Return effective (temperature, max_tokens) overrides from active skills.
+
+    Walks active skills in dispatch order (highest priority first) and returns
+    the first non-None ``temperature`` and the first non-None ``max_tokens``.
+    Fields are independent: a skill declaring only ``temperature`` does not
+    block a later skill's ``max_tokens`` from applying.
+
+    Returns ``(None, None)`` when no skill declares either field; the caller
+    then falls back to the session defaults. Overrides apply only for the
+    current turn — they do not mutate any session-level state.
+    """
+    override_temp: Optional[float] = None
+    override_tokens: Optional[int] = None
+    for skill in active_skills or []:
+        if override_temp is None and skill.temperature is not None:
+            override_temp = skill.temperature
+        if override_tokens is None and skill.max_tokens is not None:
+            override_tokens = skill.max_tokens
+        if override_temp is not None and override_tokens is not None:
+            break
+    return override_temp, override_tokens
+
+
 def _build_base_prompt(
     disabled_tools,
     mcp_mgr,
@@ -2223,12 +2249,26 @@ async def stream_agent_loop(
                 _relevant_tools = _compute_gated_tool_set(
                     _relevant_tools, _active_skills, owner
                 )
+            # Generation-parameter overrides: the highest-priority active
+            # skill that declares each field wins. Apply only for the
+            # current turn by shadowing the function parameters locally —
+            # do not persist to the session. None means "no override";
+            # fall back to the caller-supplied (session) default.
+            _override_temp, _override_tokens = _compute_skill_gen_overrides(
+                _active_skills
+            )
+            if _override_temp is not None:
+                temperature = _override_temp
+            if _override_tokens is not None:
+                max_tokens = _override_tokens
             if _active_skills:
                 logger.info(
-                    "[active-skills] resolved=%s required=%s disabled=%s",
+                    "[active-skills] resolved=%s required=%s disabled=%s temp=%s max_tokens=%s",
                     [s.name for s in _active_skills],
                     sorted({t for s in _active_skills for t in (s.tools_required or [])}),
                     sorted({t for s in _active_skills for t in (s.tools_disabled or [])}),
+                    temperature,
+                    max_tokens,
                 )
     except Exception as _e:
         logger.warning("[active-skills] dispatch failed: %s", _e)
