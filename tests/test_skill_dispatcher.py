@@ -570,6 +570,58 @@ class TestAskUserStripping:
         assert len(results) == 1
         assert results[0].tools_disabled == ["bash", "file_write"]
 
+    def test_ask_user_preserved_for_safe_admin_skill(self, monkeypatch):
+        """A safe skill owned by an admin keeps ask_user in tools_disabled."""
+        import src.tool_security as ts
+
+        monkeypatch.setattr(
+            ts, "owner_is_admin_or_single_user", lambda owner: True, raising=False
+        )
+        mgr = FakeSkillsManager(
+            [
+                _skill(
+                    "safe-skill",
+                    "Safe skill",
+                    tools_disabled=["bash", "ask_user", "file_write"],
+                    safe=True,
+                    owner="admin@x",
+                )
+            ]
+        )
+        dispatcher = SkillDispatcher(mgr)
+        results = dispatcher.resolve_active_skills("/safe-skill", owner="admin@x")
+        assert len(results) == 1
+        # ask_user must survive the dispatcher because the skill is safe and
+        # the owner is admin — the agent-loop gate is the single source of
+        # truth for the actual disable decision.
+        assert "ask_user" in results[0].tools_disabled
+        assert "bash" in results[0].tools_disabled
+        assert "file_write" in results[0].tools_disabled
+
+    def test_ask_user_stripped_for_safe_skill_non_admin_owner(self, monkeypatch):
+        """A safe skill owned by a non-admin still loses ask_user."""
+        import src.tool_security as ts
+
+        monkeypatch.setattr(
+            ts, "owner_is_admin_or_single_user", lambda owner: False, raising=False
+        )
+        mgr = FakeSkillsManager(
+            [
+                _skill(
+                    "safe-skill",
+                    "Safe skill but non-admin owner",
+                    tools_disabled=["bash", "ask_user"],
+                    safe=True,
+                    owner="user@x",
+                )
+            ]
+        )
+        dispatcher = SkillDispatcher(mgr)
+        results = dispatcher.resolve_active_skills("/safe-skill", owner="user@x")
+        assert len(results) == 1
+        assert "ask_user" not in results[0].tools_disabled
+        assert "bash" in results[0].tools_disabled
+
 
 class TestRelativePathResolution:
     def test_relative_path_resolved_against_manager_root(self, tmp_path):

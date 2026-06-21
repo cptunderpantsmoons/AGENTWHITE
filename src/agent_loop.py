@@ -1412,7 +1412,14 @@ def _compute_gated_tool_set(
          the active skill is explicitly marked ``safe`` and the owner is admin
          (or single-user mode). They are protected independently of step 4.
 
-    The returned set is passed to the prompt builder as the gated tool set.
+    Returns ``None`` when ``relevant_tools`` is ``None`` (caller falls back to
+    the full prompt). Otherwise returns the gated tool set.
+
+    The companion helper ``_compute_skill_disabled`` returns the
+    safety-filtered set of tools that active skills legitimately disabled —
+    callers must use THAT set (not the raw ``skill.tools_disabled`` lists)
+    when augmenting the runtime ``disabled_tools`` gate so the runtime
+    respects safety-critical decisions.
     """
     if relevant_tools is None:
         return None
@@ -1422,19 +1429,9 @@ def _compute_gated_tool_set(
     effective = set(relevant_tools)
 
     required: Set[str] = set()
-    skill_disabled: Set[str] = set()
+    skill_disabled = _compute_skill_disabled(active_skills, owner)
     for skill in active_skills or []:
         required.update(skill.tools_required or [])
-        for t in skill.tools_disabled or []:
-            if t in SAFETY_CRITICAL_TOOLS:
-                if not skill_can_disable_safety_critical(skill.safe, owner):
-                    logger.warning(
-                        "Skill %r attempted to disable safety-critical tool %r; ignoring",
-                        skill.name,
-                        t,
-                    )
-                    continue
-            skill_disabled.add(t)
 
     # Privilege-gate required tools: skills cannot elevate the user above their
     # normal privilege set.
@@ -1463,6 +1460,37 @@ def _compute_gated_tool_set(
         owner,
     )
     return effective
+
+
+def _compute_skill_disabled(
+    active_skills: Optional[List[ResolvedSkill]],
+    owner: Optional[str],
+) -> Set[str]:
+    """Return the safety-filtered set of tools active skills may disable.
+
+    Walks every active skill's ``tools_disabled`` list. Safety-critical tools
+    (``SAFETY_CRITICAL_TOOLS``) are dropped from the result unless the
+    declaring skill is explicitly ``safe`` AND the owner is admin/single-user.
+    All other declared disables are preserved as-is.
+
+    Both ``stream_agent_loop`` (runtime gate) and ``_compute_gated_tool_set``
+    (prompt gate) use this helper so the runtime respects safety-critical
+    decisions: a non-safe skill cannot disable ``ask_user`` from the prompt
+    AND cannot block its execution.
+    """
+    skill_disabled: Set[str] = set()
+    for skill in active_skills or []:
+        for t in skill.tools_disabled or []:
+            if t in SAFETY_CRITICAL_TOOLS:
+                if not skill_can_disable_safety_critical(skill.safe, owner):
+                    logger.warning(
+                        "Skill %r attempted to disable safety-critical tool %r; ignoring",
+                        skill.name,
+                        t,
+                    )
+                    continue
+            skill_disabled.add(t)
+    return skill_disabled
 
 
 def _build_base_prompt(
@@ -2181,9 +2209,16 @@ async def stream_agent_loop(
                 workspace=workspace,
                 pinned_names=get_active_skills(session_id),
             )
-            for skill in _active_skills:
-                for t in skill.tools_disabled or []:
-                    disabled_tools.add(t)
+            # Derive the runtime disabled_tools additions from the gated
+            # skill_disabled set, NOT from raw skill.tools_disabled. The
+            # gating helper drops safety-critical tools (e.g. ask_user) when
+            # the declaring skill is non-safe or the owner lacks admin
+            # privilege — using the raw list here would bypass that decision
+            # and block ask_user at execution time even when the prompt gate
+            # preserved it. Compute this once and apply it in both the
+            # guide_only path and the regular path below.
+            _skill_disabled = _compute_skill_disabled(_active_skills, owner)
+            disabled_tools.update(_skill_disabled)
             if not guide_only and _relevant_tools is not None:
                 _relevant_tools = _compute_gated_tool_set(
                     _relevant_tools, _active_skills, owner

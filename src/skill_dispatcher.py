@@ -18,6 +18,11 @@ import signal
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
+from src.tool_security import (
+    SAFETY_CRITICAL_TOOLS,
+    skill_can_disable_safety_critical,
+)
+
 if TYPE_CHECKING:
     from services.memory.skills import SkillsManager
 
@@ -115,19 +120,19 @@ class SkillDispatcher:
             if skill is None:
                 # Unknown slash skill: fall through to regular chat.
                 return []
-            self._add_result(skill, "slash", results, seen)
+            self._add_result(skill, "slash", results, seen, owner)
 
         # Stage 2: session-pinned skills.
         pinned_session = [by_name[n] for n in (pinned_names or []) if n in by_name]
-        self._add_stage(pinned_session, "pinned", results, seen)
+        self._add_stage(pinned_session, "pinned", results, seen, owner)
 
         # Stage 3: project-pinned skills (frontmatter pinned flag, project only).
         project_pinned = [s for s in project_skills if s.get("pinned")]
-        self._add_stage(project_pinned, "pinned", results, seen)
+        self._add_stage(project_pinned, "pinned", results, seen, owner)
 
         # Stage 4: trigger pattern matches.
         trigger_hits = [s for s in by_name.values() if self._match_triggers(message, s)]
-        self._add_stage(trigger_hits, "trigger", results, seen)
+        self._add_stage(trigger_hits, "trigger", results, seen, owner)
 
         # Stage 5: relevance fallback for any remaining slots.
         self._add_relevance_fallback(
@@ -138,6 +143,7 @@ class SkillDispatcher:
             ],
             results,
             seen,
+            owner,
         )
 
         return results
@@ -213,11 +219,12 @@ class SkillDispatcher:
         reason: str,
         results: List[ResolvedSkill],
         seen: Set[str],
+        owner: Optional[str] = None,
     ) -> None:
         for skill in self._sort_by_priority(candidates):
             if len(results) >= self.max_active:
                 break
-            self._add_result(skill, reason, results, seen)
+            self._add_result(skill, reason, results, seen, owner)
 
     def _add_result(
         self,
@@ -225,25 +232,45 @@ class SkillDispatcher:
         reason: str,
         results: List[ResolvedSkill],
         seen: Set[str],
+        owner: Optional[str] = None,
     ) -> None:
         name = skill.get("name")
         if not isinstance(name, str) or not name or name in seen:
             return
-        results.append(self._resolve(skill, reason))
+        results.append(self._resolve(skill, reason, owner))
         seen.add(name)
 
-    _SAFETY_TOOL = "ask_user"
-
-    def _resolve(self, skill: Dict[str, Any], reason: str) -> ResolvedSkill:
+    def _resolve(
+        self,
+        skill: Dict[str, Any],
+        reason: str,
+        owner: Optional[str] = None,
+    ) -> ResolvedSkill:
         name = skill["name"]
         tools_disabled = list(skill.get("tools_disabled") or [])
-        if self._SAFETY_TOOL in tools_disabled:
-            logger.warning(
-                "Skill %r attempted to disable the %r safety tool; stripping it",
-                name,
-                self._SAFETY_TOOL,
-            )
-            tools_disabled = [t for t in tools_disabled if t != self._SAFETY_TOOL]
+        safe = bool(skill.get("safe"))
+        # Strip safety-critical tools (e.g. ask_user) from tools_disabled
+        # ONLY when the declaring skill is NOT explicitly marked safe OR the
+        # owner is not admin/single-user. The safe+admin path keeps the
+        # disable so the downstream gating function in agent_loop can
+        # legitimately remove the safety-critical tool end-to-end. Stripping
+        # unconditionally here made that path unreachable in production.
+        unsafe_safety_disables = [
+            t for t in tools_disabled
+            if t in SAFETY_CRITICAL_TOOLS
+            and not skill_can_disable_safety_critical(safe, owner)
+        ]
+        if unsafe_safety_disables:
+            for t in unsafe_safety_disables:
+                logger.warning(
+                    "Skill %r attempted to disable safety-critical tool %r; stripping it",
+                    name,
+                    t,
+                )
+            tools_disabled = [
+                t for t in tools_disabled
+                if t not in unsafe_safety_disables
+            ]
 
         return ResolvedSkill(
             name=name,
@@ -256,7 +283,7 @@ class SkillDispatcher:
             inject_mode=str(skill.get("inject_mode") or "procedure"),
             reason=reason,
             source_manager=skill.get("_dispatcher_source") or self.global_manager,
-            safe=bool(skill.get("safe")),
+            safe=safe,
         )
 
     def _read_markdown(self, skill: Dict[str, Any]) -> str:
@@ -436,6 +463,7 @@ class SkillDispatcher:
         manager_skill_pairs: List[tuple[Optional[Any], List[Dict[str, Any]]]],
         results: List[ResolvedSkill],
         seen: Set[str],
+        owner: Optional[str] = None,
     ) -> None:
         remaining = self.max_active - len(results)
         if remaining <= 0:
@@ -452,7 +480,7 @@ class SkillDispatcher:
                     threshold=0.3,
                     min_confidence=self.min_confidence,
                 )
-                self._add_stage(list(relevant), "relevance", results, seen)
+                self._add_stage(list(relevant), "relevance", results, seen, owner)
             except Exception:
                 logger.exception("Relevance fallback failed")
             remaining = self.max_active - len(results)

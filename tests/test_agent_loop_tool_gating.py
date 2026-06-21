@@ -43,7 +43,13 @@ for _mod_name in ("core.database", "core.models", "src.database"):
 _agent_tools_stub = MagicMock()
 _agent_tools_stub.MAX_AGENT_ROUNDS = 5
 _agent_tools_stub.TOOL_TAGS = set()
-_agent_tools_stub.FUNCTION_TOOL_SCHEMAS = []
+# Provide a minimal schema list so the agent loop's schema-filtering path
+# (which keys off FUNCTION_TOOL_SCHEMAS) can be exercised end-to-end.
+_agent_tools_stub.FUNCTION_TOOL_SCHEMAS = [
+    {"function": {"name": "ask_user"}},
+    {"function": {"name": "bash"}},
+    {"function": {"name": "web_search"}},
+]
 sys.modules["src.agent_tools"] = _agent_tools_stub
 
 _tool_index_stub = types.ModuleType("src.tool_index")
@@ -210,6 +216,67 @@ class TestComputeGatedToolSet:
         assert "update_plan" in result
 
 
+class TestComputeSkillDisabled:
+    """Unit tests for the _compute_skill_disabled helper.
+
+    This helper is the single source of truth for what active skills may
+    legitimately disable, and is shared by both the prompt gate
+    (``_compute_gated_tool_set``) and the runtime gate
+    (``stream_agent_loop``'s ``disabled_tools`` set, including guide_only
+    mode). Safety-critical tools must be dropped here unless the declaring
+    skill is safe AND the owner is admin/single-user.
+    """
+
+    def test_non_safe_skill_cannot_disable_ask_user(self, monkeypatch):
+        monkeypatch.setattr(
+            sys.modules["src.tool_security"],
+            "owner_is_admin_or_single_user",
+            lambda owner: False,
+            raising=False,
+        )
+        result = agent_loop._compute_skill_disabled(
+            [ResolvedSkill(name="s1", markdown="", tools_disabled=["ask_user", "bash"])],
+            "user@example.com",
+        )
+        assert "ask_user" not in result
+        assert "bash" in result
+
+    def test_safe_admin_skill_can_disable_ask_user(self, monkeypatch):
+        monkeypatch.setattr(
+            sys.modules["src.tool_security"],
+            "owner_is_admin_or_single_user",
+            lambda owner: True,
+            raising=False,
+        )
+        result = agent_loop._compute_skill_disabled(
+            [ResolvedSkill(
+                name="s1", markdown="", tools_disabled=["ask_user", "bash"], safe=True
+            )],
+            "admin@example.com",
+        )
+        assert "ask_user" in result
+        assert "bash" in result
+
+    def test_safe_skill_non_admin_owner_cannot_disable_ask_user(self, monkeypatch):
+        monkeypatch.setattr(
+            sys.modules["src.tool_security"],
+            "owner_is_admin_or_single_user",
+            lambda owner: False,
+            raising=False,
+        )
+        result = agent_loop._compute_skill_disabled(
+            [ResolvedSkill(
+                name="s1", markdown="", tools_disabled=["ask_user"], safe=True
+            )],
+            "user@example.com",
+        )
+        assert "ask_user" not in result
+
+    def test_no_skills_returns_empty_set(self):
+        assert agent_loop._compute_skill_disabled([], None) == set()
+        assert agent_loop._compute_skill_disabled(None, None) == set()
+
+
 class TestToolGatingInPrompt:
     """Gated tool sets are reflected in the system prompt."""
 
@@ -294,3 +361,112 @@ class TestStreamAgentLoopToolGating:
             if m.get("role") == "system"
         )
         assert "web_search" in system_text
+
+
+class TestStreamAgentLoopSafetyCriticalEndToEnd:
+    """End-to-end: a non-safe skill cannot disable ask_user at runtime.
+
+    A non-safe skill that declares ``tools_disabled: [ask_user]`` must NOT
+    remove ``ask_user`` from the runtime disabled_tools set or the schemas
+    sent to the LLM — the gating function preserves it.
+    """
+
+    def _run_loop(self, monkeypatch, user_message, skill, owner_is_admin):
+        captured = {}
+
+        class FakeDispatcher:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def resolve_active_skills(self, *args, **kwargs):
+                return [skill]
+
+        async def fake_stream(_candidates, messages, **kwargs):
+            captured["tools"] = kwargs.get("tools")
+            captured["messages"] = messages
+            yield 'data: {"delta": "ok"}\n\n'
+            yield "data: [DONE]\n\n"
+
+        monkeypatch.setattr(agent_loop, "SkillDispatcher", FakeDispatcher, raising=False)
+        monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set(), raising=False)
+        monkeypatch.setattr(
+            sys.modules["src.tool_security"],
+            "owner_is_admin_or_single_user",
+            lambda owner: owner_is_admin,
+            raising=False,
+        )
+        monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None, raising=False)
+        monkeypatch.setattr(agent_loop, "estimate_tokens", lambda *a, **k: 10, raising=False)
+        monkeypatch.setattr(agent_loop, "strip_tool_blocks", lambda text, skip_fenced=False: text, raising=False)
+        monkeypatch.setattr(agent_loop, "parse_tool_blocks", lambda text, skip_fenced=False: [], raising=False)
+        monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream, raising=False)
+
+        chunks = _collect(
+            agent_loop.stream_agent_loop(
+                # Use a host that is in _API_HOSTS so the loop picks the native
+                # schema-filtering path (otherwise schemas are dropped for
+                # local-only MCP-style messages).
+                "https://api.openai.com/v1",
+                "m",
+                [user_message],
+                max_rounds=1,
+                relevant_tools={"ask_user", "bash"},
+                owner="user@example.com",
+            )
+        )
+        return captured, chunks
+
+    def _schema_names(self, tools):
+        names = set()
+        for t in (tools or []):
+            fn = t.get("function") or {}
+            if fn.get("name"):
+                names.add(fn["name"])
+            elif t.get("name"):
+                names.add(t["name"])
+        return names
+
+    def test_non_safe_skill_does_not_disable_ask_user_at_runtime(self, monkeypatch, user_message):
+        """A non-safe skill declaring tools_disabled=[ask_user] preserves ask_user."""
+        skill = ResolvedSkill(
+            name="unsafe-skill",
+            markdown="",
+            tools_disabled=["ask_user"],
+            safe=False,
+        )
+        captured, chunks = self._run_loop(monkeypatch, user_message, skill, owner_is_admin=False)
+
+        assert chunks, "fake stream was not consumed"
+        assert "tools" in captured, "stream_llm_with_fallback was not called"
+
+        schemas = captured["tools"] or []
+        names = self._schema_names(schemas)
+        # ask_user must remain in the schemas — it was NOT added to disabled_tools.
+        assert "ask_user" in names, (
+            f"ask_user was stripped at runtime even though the skill is non-safe; "
+            f"schemas={sorted(names)}"
+        )
+
+    def test_safe_admin_skill_disables_ask_user_end_to_end(self, monkeypatch, user_message):
+        """A safe, admin-owned skill declaring tools_disabled=[ask_user] removes ask_user."""
+        skill = ResolvedSkill(
+            name="safe-skill",
+            markdown="",
+            tools_disabled=["ask_user"],
+            safe=True,
+        )
+        captured, chunks = self._run_loop(monkeypatch, user_message, skill, owner_is_admin=True)
+
+        assert chunks, "fake stream was not consumed"
+        assert "tools" in captured, "stream_llm_with_fallback was not called"
+
+        schemas = captured["tools"] or []
+        names = self._schema_names(schemas)
+        # ask_user must be filtered out — the safe+admin path legitimately
+        # disables it end-to-end.
+        assert "ask_user" not in names, (
+            f"ask_user was NOT disabled end-to-end for safe+admin skill; "
+            f"schemas={sorted(names)}"
+        )
+        # Sanity: bash (not in tools_disabled) survives.
+        assert "bash" in names
