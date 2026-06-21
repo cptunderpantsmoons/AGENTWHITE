@@ -96,7 +96,7 @@ class SkillDispatcher:
     ) -> List[ResolvedSkill]:
         """Return the active skills for this turn, capped at ``max_active``."""
         message = (user_message or "").strip()
-        by_name = self._load_skills(owner, workspace)
+        by_name, global_skills, project_skills = self._load_skills(owner, workspace)
         if not by_name:
             return []
 
@@ -116,8 +116,8 @@ class SkillDispatcher:
         pinned_session = [by_name[n] for n in (pinned_names or []) if n in by_name]
         self._add_stage(pinned_session, "pinned", results, seen)
 
-        # Stage 3: project-pinned skills (frontmatter pinned flag).
-        project_pinned = [s for s in by_name.values() if s.get("pinned")]
+        # Stage 3: project-pinned skills (frontmatter pinned flag, project only).
+        project_pinned = [s for s in project_skills if s.get("pinned")]
         self._add_stage(project_pinned, "pinned", results, seen)
 
         # Stage 4: trigger pattern matches.
@@ -125,7 +125,15 @@ class SkillDispatcher:
         self._add_stage(trigger_hits, "trigger", results, seen)
 
         # Stage 5: relevance fallback for any remaining slots.
-        self._add_relevance_fallback(message, by_name, results, seen)
+        self._add_relevance_fallback(
+            message,
+            [
+                (self.project_manager, project_skills),
+                (self.global_manager, global_skills),
+            ],
+            results,
+            seen,
+        )
 
         return results
 
@@ -135,12 +143,16 @@ class SkillDispatcher:
 
     def _load_skills(
         self, owner: Optional[str], workspace: Optional[str]
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """Load global skills and, with a workspace, project-local skills.
 
-        Project-local skills override global skills with the same name.
+        Returns a tuple of:
+          - merged skills by name (project overrides global)
+          - global skill records in load order
+          - project-local skill records in load order
         """
-        global_skills: Dict[str, Dict[str, Any]] = {}
+        global_skills_by_name: Dict[str, Dict[str, Any]] = {}
+        global_skills_list: List[Dict[str, Any]] = []
         if self.global_manager is not None:
             try:
                 for skill in self._manager_load(self.global_manager, owner):
@@ -148,11 +160,13 @@ class SkillDispatcher:
                     if isinstance(name, str) and name:
                         skill = dict(skill)
                         skill["_dispatcher_source"] = self.global_manager
-                        global_skills[name] = skill
+                        global_skills_by_name[name] = skill
+                        global_skills_list.append(skill)
             except Exception:
                 logger.exception("Failed to load global skills")
 
-        project_skills: Dict[str, Dict[str, Any]] = {}
+        project_skills_by_name: Dict[str, Dict[str, Any]] = {}
+        project_skills_list: List[Dict[str, Any]] = []
         if workspace and self.project_manager is not None:
             try:
                 for skill in self._manager_load(self.project_manager, owner):
@@ -160,14 +174,15 @@ class SkillDispatcher:
                     if isinstance(name, str) and name:
                         skill = dict(skill)
                         skill["_dispatcher_source"] = self.project_manager
-                        project_skills[name] = skill
+                        project_skills_by_name[name] = skill
+                        project_skills_list.append(skill)
             except Exception:
                 logger.exception("Failed to load project-local skills")
 
         # Local overrides global.
-        merged = dict(global_skills)
-        merged.update(project_skills)
-        return merged
+        merged = dict(global_skills_by_name)
+        merged.update(project_skills_by_name)
+        return merged, global_skills_list, project_skills_list
 
     @staticmethod
     def _manager_load(manager: Any, owner: Optional[str]) -> List[Dict[str, Any]]:
@@ -268,7 +283,7 @@ class SkillDispatcher:
         return ""
 
     @staticmethod
-    def _manager_skills_root(manager: Any) -> Optional[str]:
+    def _resolve_manager_skills_root(manager: Any) -> Optional[str]:
         """Return the skills root directory for a manager, if any."""
         if manager is None:
             return None
@@ -279,17 +294,16 @@ class SkillDispatcher:
                 root = os.path.join(data_dir, "skills")
         return str(root) if root else None
 
+    @staticmethod
+    def _manager_skills_root(manager: Any) -> Optional[str]:
+        """Return the skills root directory for a manager, if any."""
+        return SkillDispatcher._resolve_manager_skills_root(manager)
+
     def _allowed_roots(self) -> List[str]:
         """Return the realpaths of directories from which markdown may be read."""
         roots: List[str] = []
         for mgr in (self.global_manager, self.project_manager):
-            if mgr is None:
-                continue
-            root = getattr(mgr, "skills_root", None)
-            if not root:
-                data_dir = getattr(mgr, "data_dir", None)
-                if data_dir:
-                    root = os.path.join(data_dir, "skills")
+            root = self._resolve_manager_skills_root(mgr)
             if root and os.path.isdir(root):
                 roots.append(os.path.realpath(root))
         return roots
@@ -408,20 +422,21 @@ class SkillDispatcher:
     def _add_relevance_fallback(
         self,
         message: str,
-        by_name: Dict[str, Dict[str, Any]],
+        manager_skill_pairs: List[tuple[Optional[Any], List[Dict[str, Any]]]],
         results: List[ResolvedSkill],
         seen: Set[str],
     ) -> None:
         remaining = self.max_active - len(results)
         if remaining <= 0:
             return
-        for manager in (self.global_manager, self.project_manager):
+        # Project-local relevance is considered before global relevance.
+        for manager, skills in manager_skill_pairs:
             if manager is None or not hasattr(manager, "get_relevant_skills"):
                 continue
             try:
                 relevant = manager.get_relevant_skills(
                     message,
-                    skills=list(by_name.values()),
+                    skills=skills,
                     max_items=remaining,
                     threshold=0.3,
                     min_confidence=self.min_confidence,

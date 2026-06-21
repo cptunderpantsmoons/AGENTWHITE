@@ -247,14 +247,19 @@ class TestPinnedSkills:
             ), f"missing pinned skill for message {message!r}"
 
     def test_project_pinned_flag_included(self):
-        mgr = FakeSkillsManager(
+        project_mgr = FakeSkillsManager(
             [
                 _skill("adhoc", "Adhoc"),
                 _skill("always", "Always use", pinned=True),
             ]
         )
-        dispatcher = SkillDispatcher(mgr)
-        results = dispatcher.resolve_active_skills("generic message")
+        dispatcher = SkillDispatcher(
+            skills_manager=FakeSkillsManager([]),
+            project_skills_manager=project_mgr,
+        )
+        results = dispatcher.resolve_active_skills(
+            "generic message", workspace="/tmp/proj"
+        )
         names = {r.name: r.reason for r in results}
         assert names.get("always") == "pinned"
 
@@ -539,3 +544,95 @@ class TestRelativePathResolution:
         results = dispatcher.resolve_active_skills("/relative")
         assert len(results) == 1
         assert results[0].markdown == "# from relative path\n"
+
+
+class FixedOrderManager(FakeSkillsManager):
+    """Fake manager that returns skills sorted by priority (descending)."""
+
+    def get_relevant_skills(self, query, skills=None, **kwargs):
+        target = list(skills or self.skills)
+        target.sort(key=lambda s: -s.get("priority", 0))
+        return target[: kwargs.get("max_items", 5)]
+
+
+class TestProjectPinnedFilter:
+    def test_global_pinned_not_in_project_pinned_stage(self):
+        global_mgr = FakeSkillsManager(
+            [_skill("global_pinned", "Global pinned", pinned=True)]
+        )
+        project_mgr = FakeSkillsManager(
+            [_skill("project_pinned", "Project pinned", pinned=True)]
+        )
+        dispatcher = SkillDispatcher(global_mgr, project_skills_manager=project_mgr)
+        results = dispatcher.resolve_active_skills(
+            "generic message", workspace="/tmp/proj"
+        )
+        assert [r.name for r in results] == ["project_pinned"]
+        assert results[0].reason == "pinned"
+
+    def test_project_pinned_stage_empty_without_project_manager(self):
+        global_mgr = FakeSkillsManager(
+            [_skill("global_pinned", "Global pinned", pinned=True)]
+        )
+        dispatcher = SkillDispatcher(global_mgr)
+        results = dispatcher.resolve_active_skills(
+            "generic message", workspace="/tmp/proj"
+        )
+        assert not any(
+            r.name == "global_pinned" and r.reason == "pinned" for r in results
+        )
+
+
+class TestRelevanceFallbackProjectFirst:
+    def test_project_relevance_considered_before_global(self):
+        global_mgr = FixedOrderManager(
+            [_skill("global_high", "Global high", priority=100)]
+        )
+        project_mgr = FixedOrderManager(
+            [_skill("project_low", "Project low", priority=1)]
+        )
+        dispatcher = SkillDispatcher(
+            global_mgr, project_skills_manager=project_mgr, max_active=2
+        )
+        results = dispatcher.resolve_active_skills(
+            "relevance query", workspace="/tmp/proj"
+        )
+        assert [r.name for r in results] == ["project_low", "global_high"]
+
+
+class TestRelevanceFallbackSkillIsolation:
+    def test_each_manager_receives_only_its_own_skills(self):
+        class Recorder(FakeSkillsManager):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.received_skills = None
+
+            def get_relevant_skills(self, query, skills=None, **kwargs):
+                self.received_skills = list(skills or [])
+                return super().get_relevant_skills(query, skills, **kwargs)
+
+        global_skill = _skill(
+            "shared", "Global shared", _markdown="global md", priority=10
+        )
+        project_skill = _skill(
+            "shared", "Project shared", _markdown="project md", priority=5
+        )
+        global_recorder = Recorder([global_skill])
+        project_recorder = Recorder([project_skill])
+
+        dispatcher = SkillDispatcher(
+            global_recorder,
+            project_skills_manager=project_recorder,
+            max_active=2,
+        )
+        results = dispatcher.resolve_active_skills(
+            "shared query", workspace="/tmp/proj"
+        )
+
+        assert [s["name"] for s in global_recorder.received_skills] == ["shared"]
+        assert global_recorder.received_skills[0]["_markdown"] == "global md"
+
+        assert [s["name"] for s in project_recorder.received_skills] == ["shared"]
+        assert project_recorder.received_skills[0]["_markdown"] == "project md"
+
+        assert results[0].markdown == "project md"
