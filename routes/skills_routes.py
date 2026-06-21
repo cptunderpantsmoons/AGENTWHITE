@@ -136,6 +136,48 @@ class SkillUpdateRequest(BaseModel):
     steps: Optional[List[str]] = None
 
 
+# Reserved sentinels that a skill name must never collide with. Skill
+# names double as agent slash commands (``/<skill-name>``), as on-disk
+# directory names under ``data/skills/``, and as owner-attribution keys
+# in usage sidecars — a collision with a synthetic-owner sentinel (e.g.
+# ``internal-tool``) would let a user-authored skill masquerade as the
+# in-process tool loopback, or as the bearer-token owner attribution
+# sentinel (``api``). ``admin`` is reserved because the auth layer
+# treats it as the privileged default account name; a skill named
+# ``admin`` would shadow it in owner-keyed lookups. ``demo``/``system``
+# round out the synthetic-owner set the rest of the codebase already
+# special-cases. Keep in sync with ``core.auth.RESERVED_USERNAMES`` plus
+# ``admin``.
+RESERVED_SKILL_NAMES = frozenset({
+    "internal-tool", "api", "demo", "system", "admin",
+})
+
+
+def _validate_skill_name(name: Optional[str]) -> None:
+    """Reject a skill name that collides with a reserved sentinel.
+
+    Skill names are slugified before they hit disk, but the slugify step
+    strips ``.``/``_``/case, NOT the dash — so a hand-crafted POST with
+    ``name="internal-tool"`` would survive slugify unchanged and create
+    a directory ``data/skills/general/internal-tool/``. That collides
+    with the synthetic-owner sentinel of the same name, which the auth
+    layer treats as the in-process tool loopback user.
+
+    Reject on the add path (POST /api/skills/add) AND on the rename
+    path (PUT /api/skills/{skill_id} with a new ``name`` field). The
+    markdown editor is already pinned to the existing skill's name
+    (see ``save_skill_markdown``), so it does not need a separate check.
+    """
+    candidate = (name or "").strip().lower()
+    if not candidate:
+        return  # caller's required-field validation handles empty names
+    if candidate in RESERVED_SKILL_NAMES:
+        raise HTTPException(
+            400,
+            f"Skill name {name!r} is reserved and cannot be used.",
+        )
+
+
 def _validate_tool_names(*lists) -> None:
     """Reject unknown tool names in tools_required / tools_disabled.
 
@@ -1659,6 +1701,14 @@ def setup_skills_routes(
     @router.post("/add")
     async def add_skill(request: Request, body: SkillAddRequest):
         user = _owner(request)
+        # Server-side backstop: reject skill names that collide with
+        # reserved sentinels (internal-tool, api, demo, system, admin)
+        # BEFORE they reach SkillsManager. A collision would let a
+        # user-authored skill masquerade as the in-process tool loopback
+        # or shadow the privileged default admin account in owner-keyed
+        # lookups. The client-side validator is bypassed by a hand-crafted
+        # POST or third-party client.
+        _validate_skill_name(body.name)
         # Server-side backstop: reject unknown tool names BEFORE they reach
         # SkillsManager so the on-disk skill can never carry a tool gate
         # the dispatcher would silently drop (tool gating narrows, never
@@ -2059,6 +2109,11 @@ def setup_skills_routes(
         # client-side validator checks the same set; this guards against a
         # fetch failure, a hand-crafted PUT, or a third-party client.
         _validate_tool_names(body.tools_required, body.tools_disabled)
+        # Reject rename into a reserved sentinel name. The PUT path allows
+        # renaming (SkillsManager.update_skill moves the directory), so a
+        # PUT with body.name="internal-tool" would create the same collision
+        # as the add path. Fail closed at the route boundary.
+        _validate_skill_name(body.name)
         # Range validation backstop: reject out-of-range temperature /
         # max_tokens. None is always valid (field cleared or unset); only
         # a non-None value outside [0,2] / <0 raises HTTP 400.
