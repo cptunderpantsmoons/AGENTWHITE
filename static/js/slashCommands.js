@@ -336,56 +336,77 @@ async function _loadSkillSlashCatalog(force = false) {
   }
 }
 
-function _submitSlashMessage(text) {
-  const msgInput = document.getElementById('message');
-  const form = document.getElementById('chat-form');
-  if (!msgInput || !form) return false;
-  // The slash handler and app-level form debounce must both release before
-  // sending the follow-up message, otherwise the form submit is dropped.
-  setTimeout(() => {
-    msgInput.value = text;
-    msgInput.dispatchEvent(new Event('input', { bubbles: true }));
-    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-  }, 350);
-  return true;
-}
-
-async function _invokeSkillByName(name, requestText, ctx) {
-  // Send the original slash input so the server can store the active skill
-  // and resolve/inject it on the next turn. Do not embed skill markdown here.
-  const originalInput = requestText ? `/${name} ${requestText}` : `/${name}`;
-  const res = await fetch(`${API_BASE}/api/skills/invoke`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name,
-      args: requestText || '',
-      session_id: ctx?.sid || ''
-    })
-  });
-  if (res.status === 404) {
-    // Unknown skill: fall through to regular chat.
-    return false;
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => null);
-    slashReply(ctx?.esc ? ctx.esc(err?.detail || 'Skill is not available') : 'Skill is not available');
+/**
+ * Handle a slash skill invocation: /name [args].
+ *
+ * The server is the single source of truth for whether the named skill exists
+ * and is accessible. On success the stripped request is forwarded through the
+ * normal chat path (server-side injection will supply the skill markdown). On
+ * 404 we surface "Unknown skill" and fall through so the message is sent to
+ * the LLM unchanged. On 403 we show "Access denied". Network or unexpected
+ * errors show a user-visible message and are treated as handled so they do not
+ * silently re-submit to the model.
+ */
+async function _handleSkillInvocation(name, args, ctx, { showUser }) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/api/skills/invoke`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        args: args || '',
+        session_id: ctx?.sid || ''
+      })
+    });
+  } catch (err) {
+    if (showUser) showUser();
+    slashReply('Skill invocation failed: ' + ctx.esc(err.message));
     return true;
   }
-  const data = await res.json();
+
+  if (res.status === 404) {
+    // Unknown skill: surface feedback but let the caller fall through to
+    // regular chat so the message reaches the LLM unchanged.
+    slashReply('Unknown skill: /' + ctx.esc(name));
+    return false;
+  }
+  if (res.status === 403) {
+    if (showUser) showUser();
+    slashReply('Access denied');
+    return true;
+  }
+  if (!res.ok) {
+    if (showUser) showUser();
+    const err = await res.json().catch(() => null);
+    slashReply(ctx.esc(err?.detail || 'Skill is not available'));
+    return true;
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    if (showUser) showUser();
+    slashReply('Skill invocation failed: invalid response');
+    return true;
+  }
   if (!data.ok) {
+    if (showUser) showUser();
     slashReply('Could not start skill invocation.');
     return true;
   }
+
+  if (showUser) showUser();
   // Strip the leading "/<skill-name>" and send the remaining request text
   // through the normal chat path. Do not resubmit the slash-prefixed input,
   // because every form submit is routed through handleSlashCommand and would
   // recursively invoke the skill again.
-  const strippedInput = requestText || '';
+  const strippedInput = args || '';
   if (_sendMessageFn) {
     _sendMessageFn(strippedInput);
-  } else if (!_submitSlashMessage(originalInput)) {
+  } else {
     slashReply('Could not start skill invocation.');
   }
   return true;
@@ -6276,6 +6297,11 @@ function _fuzzyMatch(typed, maxDist) {
 
 function _isCmd(str) { return str.startsWith('/') || str.startsWith('!'); }
 
+/** Normalize a command handler result to a strict boolean.
+ * Only an explicit `false` is treated as fall-through; everything else
+ * (including void/undefined return values) means the input was handled. */
+function _asHandled(result) { return result === false ? false : true; }
+
 // ── Main dispatcher ───────────────────────────────────────────────
 
 async function handleSlashCommand(input) {
@@ -6310,7 +6336,7 @@ async function handleSlashCommand(input) {
             slashReply(`<pre>${usage}\n${subDef.help || 'No help available.'}</pre>`);
             return true;
           }
-          return await subDef.handler(args, ctx);
+          return _asHandled(await subDef.handler(args, ctx));
         }
       } else if (cmdDef && cmdDef.handler) {
         _showUser();
@@ -6319,7 +6345,7 @@ async function handleSlashCommand(input) {
           slashReply(`<pre>${usage}\n${cmdDef.help || 'No help available.'}</pre>`);
           return true;
         }
-        return await cmdDef.handler(args, ctx);
+        return _asHandled(await cmdDef.handler(args, ctx));
       }
     }
 
@@ -6355,7 +6381,7 @@ async function handleSlashCommand(input) {
             slashReply(`<pre>${usage}\n${subDef.help || 'No help available.'}</pre>`);
             return true;
           }
-          return await subDef.handler(subArgs, ctx);
+          return _asHandled(await subDef.handler(subArgs, ctx));
         }
 
         // No matching sub — use default if defined
@@ -6364,7 +6390,7 @@ async function handleSlashCommand(input) {
           const defSub = cmdDef.subs[defKey];
           if (defSub) {
             // For the default sub, pass all args through (they weren't consumed as a sub name)
-            return await defSub.handler(args, ctx);
+            return _asHandled(await defSub.handler(args, ctx));
           }
         }
 
@@ -6379,27 +6405,25 @@ async function handleSlashCommand(input) {
         slashReply(`<pre>${usage}\n${cmdDef.help || 'No help available.'}</pre>`);
         return true;
       }
-      return await cmdDef.handler(args, ctx);
+      return _asHandled(await cmdDef.handler(args, ctx));
     }
 
-    // --- 4. Skill invocation: /<skill-name> [request] ---
-    // If `rawCmd` matches a published skill, the backend records usage and
-    // returns a skill-pinned message to submit as the next agent turn.
-    try {
-      const catalog = await _loadSkillSlashCatalog(false);
-      if (catalog.some(s => s.name === rawCmd)) {
-        _showUser();
-        return await _invokeSkillByName(rawCmd, args.join(' ').trim(), ctx);
-      }
-    } catch (_) { /* fall through to fuzzy match */ }
-
-    // --- 5. Fuzzy match for typos ---
+    // --- 4. Fuzzy match for typos before treating the input as a skill ---
+    // This keeps helpful suggestions for command typos and ensures built-in
+    // aliases (/new, /clear, /web, ...) take precedence over skills with the
+    // same name.
     const suggestions = _fuzzyMatch(rawCmd);
     if (suggestions.length) {
       _showUser();
       slashReply(`Unknown command "/${ctx.esc(rawCmd)}". Did you mean: ${suggestions.map(s => '<b>/'+s+'</b>').join(', ')}?`);
       return true;
     }
+
+    // --- 5. Skill invocation: /<skill-name> [request] ---
+    // The server is the authority on whether this name is a skill and whether
+    // the current user is allowed to invoke it. A 404 falls through so the
+    // original message is sent to the model unchanged.
+    return _asHandled(await _handleSkillInvocation(rawCmd, args.join(' ').trim(), ctx, { showUser: _showUser }));
 
   } catch (err) {
     _showUser();
@@ -6508,7 +6532,7 @@ export function clearSetupMode(preservePendingState = false) {
   }
 }
 
-export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS };
+export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS, _resolveCommand, _resolveSubcommand, _fuzzyMatch, _handleSkillInvocation };
 
 const slashCommands = {
   initSlashCommands,

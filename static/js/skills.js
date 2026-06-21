@@ -108,6 +108,8 @@ export async function loadSkills(cascade = false) {
     loaded = true;
     renderSkillsList();
     updateCount();
+    // Notify the slash autocomplete so it can refresh its skill rows.
+    document.dispatchEvent(new CustomEvent('skills-catalog-changed', { bubbles: true }));
     if (_pendingFocusSkill) {
       _focusSkillRow(_pendingFocusSkill);
       _pendingFocusSkill = null;

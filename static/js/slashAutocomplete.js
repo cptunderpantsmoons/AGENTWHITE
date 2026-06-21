@@ -98,6 +98,21 @@ async function _loadSkillEntries() {
   }
 }
 
+/** Merge skill rows into the base command list. Built-in tokens win on collisions.
+ * Skills are appended after built-ins so they rank lower for identical tokens. */
+function _mergeSkills(baseEntries, skillEntries) {
+  if (!skillEntries || !skillEntries.length) return baseEntries;
+  const seen = new Set(baseEntries.map(e => e.token));
+  const merged = baseEntries.slice();
+  for (const entry of skillEntries) {
+    if (!entry.token || !entry.token.startsWith('/')) continue;
+    if (seen.has(entry.token)) continue;
+    seen.add(entry.token);
+    merged.push(entry);
+  }
+  return merged;
+}
+
 function _scoreMatch(entry, query) {
   // query already starts with "/". Match against token + aliases. Prefix wins
   // over substring; alias match scores slightly lower than token match.
@@ -213,11 +228,12 @@ export function initSlashAutocomplete(textarea) {
 
   const refresh = () => {
     const v = textarea.value;
-    // Only trigger when the message starts with "/" (no leading space) and
-    // contains at most one space after the command (so subcommands work).
-    // If the user has moved past the slash command (newline, longer prose),
-    // the menu hides — we don't autocomplete mid-sentence.
-    if (!v.startsWith('/') || v.includes('\n')) { hide(); return; }
+    const cursor = textarea.selectionStart ?? v.length;
+    const firstSpace = v.indexOf(' ');
+    // Only trigger when the message starts with "/" (no leading space), the
+    // caret is still inside the command token (at or before the first space),
+    // and the input has not moved onto a new paragraph.
+    if (!v.startsWith('/') || v.includes('\n') || (firstSpace !== -1 && cursor > firstSpace)) { hide(); return; }
     const query = v.trim();
     const groupItems = _exactCommandGroupItems(all, query);
     if (groupItems.length) {
@@ -240,17 +256,18 @@ export function initSlashAutocomplete(textarea) {
     _render(popup, items, selectedIdx, query);
   };
 
+  // Initial skill catalog load, then keep the list warm by refreshing whenever
+  // the Skills panel is opened/closed or a skill is created/edited/deleted.
   _loadSkillEntries().then(skillEntries => {
-    if (!skillEntries.length) return;
-    const seen = new Set(all.map(e => e.token));
-    const merged = all.slice();
-    for (const entry of skillEntries) {
-      if (seen.has(entry.token)) continue;
-      seen.add(entry.token);
-      merged.push(entry);
-    }
-    all = merged;
+    all = _mergeSkills(all, skillEntries);
     if (visible) refresh();
+  });
+
+  document.addEventListener('skills-catalog-changed', () => {
+    _loadSkillEntries().then(skillEntries => {
+      all = _mergeSkills(_flatten(), skillEntries);
+      if (visible) refresh();
+    });
   });
 
   const insert = (token) => {
