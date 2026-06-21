@@ -193,6 +193,18 @@ def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
         return False
 
 
+# Tools whose removal from the available tool set requires both admin privilege
+# and an explicit "safe" marker on the active skill. These are core safety
+# surfaces (user clarification, plan progress) that user-supplied skills must not
+# silently disable.
+SAFETY_CRITICAL_TOOLS = frozenset({"ask_user"})
+
+
+def skill_can_disable_safety_critical(is_safe_skill: bool, owner: Optional[str]) -> bool:
+    """Return True only when a skill is explicitly marked safe and the user is admin/single-user."""
+    return bool(is_safe_skill and owner_is_admin_or_single_user(owner))
+
+
 def blocked_tools_for_owner(owner: Optional[str]) -> Set[str]:
     """Tools to hide/disable for this owner under public-user policy."""
     if owner_is_admin_or_single_user(owner):

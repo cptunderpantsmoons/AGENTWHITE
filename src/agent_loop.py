@@ -21,7 +21,12 @@ from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.session_skill_state import get_active_skills
 from src.skill_dispatcher import ResolvedSkill, SkillDispatcher
-from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
+from src.tool_security import (
+    blocked_tools_for_owner,
+    plan_mode_disabled_tools,
+    SAFETY_CRITICAL_TOOLS,
+    skill_can_disable_safety_critical,
+)
 from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
 from src.tool_utils import _truncate, get_mcp_manager
 from src.agent_tools import (
@@ -1385,6 +1390,80 @@ _ADMIN_TOOLS = {
     "send_to_session", "pipeline", "ask_teacher", "list_models",
 }
 
+
+def _compute_gated_tool_set(
+    relevant_tools: Optional[Set[str]],
+    active_skills: Optional[List[ResolvedSkill]],
+    owner: Optional[str],
+) -> Optional[Set[str]]:
+    """Apply active-skill tool gating to the selected relevant tools.
+
+    Rules (in order):
+      1. Start from the already-selected relevant tools; if RAG did not produce
+         a set, return ``None`` so the caller falls back to the full prompt.
+      2. Union every tool declared in any active skill's ``tools_required``.
+      3. Filter required tools through the owner's privilege set; required tools
+         the user is not privileged to use are dropped and logged.
+      4. Remove every tool declared in any active skill's ``tools_disabled``.
+         ``tools_disabled`` wins over ``tools_required`` when skills conflict.
+      5. Preserve the hardcoded ``ALWAYS_AVAILABLE`` set unless an active skill
+         explicitly disables one of those tools.
+      6. Safety-critical tools (e.g. ``ask_user``) cannot be disabled unless
+         the active skill is explicitly marked ``safe`` and the owner is admin
+         (or single-user mode). They are protected independently of step 4.
+
+    The returned set is passed to the prompt builder as the gated tool set.
+    """
+    if relevant_tools is None:
+        return None
+
+    from src.tool_index import ALWAYS_AVAILABLE
+
+    effective = set(relevant_tools)
+
+    required: Set[str] = set()
+    skill_disabled: Set[str] = set()
+    for skill in active_skills or []:
+        required.update(skill.tools_required or [])
+        for t in skill.tools_disabled or []:
+            if t in SAFETY_CRITICAL_TOOLS:
+                if not skill_can_disable_safety_critical(skill.safe, owner):
+                    logger.warning(
+                        "Skill %r attempted to disable safety-critical tool %r; ignoring",
+                        skill.name,
+                        t,
+                    )
+                    continue
+            skill_disabled.add(t)
+
+    # Privilege-gate required tools: skills cannot elevate the user above their
+    # normal privilege set.
+    blocked = blocked_tools_for_owner(owner)
+    unauthorized_required = required & blocked
+    if unauthorized_required:
+        logger.info(
+            "[tool-gating] required tools outside privilege set dropped: %s",
+            sorted(unauthorized_required),
+        )
+    effective |= required - blocked
+
+    # Active-skill disabled tools override active-skill required tools.
+    effective -= skill_disabled
+
+    # Preserve ALWAYS_AVAILABLE unless an active skill explicitly disabled it.
+    always_available = set(ALWAYS_AVAILABLE)
+    effective |= always_available - skill_disabled
+
+    logger.info(
+        "[tool-gating] effective_tools=%s required=%s disabled=%s owner=%s",
+        sorted(effective),
+        sorted(required),
+        sorted(skill_disabled),
+        owner,
+    )
+    return effective
+
+
 def _build_base_prompt(
     disabled_tools,
     mcp_mgr,
@@ -1407,14 +1486,10 @@ def _build_base_prompt(
         disabled.add("generate_image")
 
     if relevant_tools is not None:
-        # RAG mode: trust the relevant_tools set as already-composed.
-        # get_tools_for_query starts from ALWAYS_AVAILABLE and may
-        # *discard* tools that conflict with the query's intent (e.g.
-        # drop manage_memory for clear contact-save patterns). Unioning
-        # ALWAYS_AVAILABLE back in here used to silently undo those
-        # drops. Only force-include the irreducible loop primitives
-        # (ask_user, update_plan) as belt-and-suspenders.
-        tool_names = set(relevant_tools) | {"ask_user", "update_plan"}
+        # RAG mode: trust the relevant_tools set as already gated by the loop.
+        # Active skills may have added required tools, removed disabled tools,
+        # and preserved ALWAYS_AVAILABLE; do not second-guess them here.
+        tool_names = set(relevant_tools)
         if needs_admin:
             tool_names |= _ADMIN_TOOLS
         agent_prompt = _assemble_prompt(tool_names, disabled, compact=compact)
@@ -2108,10 +2183,10 @@ async def stream_agent_loop(
             for skill in _active_skills:
                 for t in skill.tools_disabled or []:
                     disabled_tools.add(t)
-                if not guide_only and _relevant_tools is not None:
-                    for t in skill.tools_required or []:
-                        if t not in disabled_tools:
-                            _relevant_tools.add(t)
+            if not guide_only and _relevant_tools is not None:
+                _relevant_tools = _compute_gated_tool_set(
+                    _relevant_tools, _active_skills, owner
+                )
             if _active_skills:
                 logger.info(
                     "[active-skills] resolved=%s required=%s disabled=%s",

@@ -43,6 +43,7 @@ class ResolvedSkill:
     inject_mode: str = "procedure"
     reason: str = "relevance"
     source_manager: Optional[Any] = None
+    safe: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class ResolvedSkill:
             "max_tokens": self.max_tokens,
             "inject_mode": self.inject_mode,
             "reason": self.reason,
+            "safe": self.safe,
         }
 
 
@@ -254,6 +256,7 @@ class SkillDispatcher:
             inject_mode=str(skill.get("inject_mode") or "procedure"),
             reason=reason,
             source_manager=skill.get("_dispatcher_source") or self.global_manager,
+            safe=bool(skill.get("safe")),
         )
 
     def _read_markdown(self, skill: Dict[str, Any]) -> str:
