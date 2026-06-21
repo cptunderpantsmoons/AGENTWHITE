@@ -337,6 +337,7 @@ def setup_chat_routes(
     memory_vector=None,
     webhook_manager=None,
     skills_manager=None,
+    project_skills_manager=None,
 ) -> APIRouter:
     router = APIRouter(tags=["chat"])
 
@@ -1280,6 +1281,7 @@ def setup_chat_routes(
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                         workspace=workspace or None,
+                        project_skills_manager=project_skills_manager,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

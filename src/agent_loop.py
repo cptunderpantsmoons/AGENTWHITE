@@ -12,13 +12,15 @@ import json
 import re
 import time
 import logging
-from typing import AsyncGenerator, List, Dict, Optional, Set
+from typing import Any, AsyncGenerator, List, Dict, Optional, Set
 from urllib.parse import urlparse
 
 from src.llm_core import stream_llm, stream_llm_with_fallback, _is_ollama_native_url
 from src.model_context import estimate_tokens
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
+from src.session_skill_state import get_active_skills
+from src.skill_dispatcher import ResolvedSkill, SkillDispatcher
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
 from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
 from src.tool_utils import _truncate, get_mcp_manager
@@ -867,6 +869,7 @@ def _build_system_prompt(
     owner: Optional[str] = None,
     suppress_local_context: bool = False,
     active_email: Optional[Dict[str, str]] = None,
+    active_skills: Optional[List[ResolvedSkill]] = None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -883,7 +886,22 @@ def _build_system_prompt(
         _ov_sig = _hl.sha256(_json.dumps(get_builtin_overrides() or {}, sort_keys=True).encode()).hexdigest()
     except Exception:
         _ov_sig = ""
-    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, owner, suppress_local_context)
+    # Active skill names (and a hash of their markdown) must bust the cache
+    # when a skill is edited or a different skill becomes active.
+    _active_skill_key = tuple(
+        sorted((s.name, hash(s.markdown)) for s in (active_skills or []))
+    )
+    cache_key = (
+        frozenset(disabled_tools or []),
+        bool(mcp_mgr),
+        needs_admin,
+        _rt_key,
+        compact,
+        _ov_sig,
+        owner,
+        suppress_local_context,
+        _active_skill_key,
+    )
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
@@ -1290,6 +1308,21 @@ def _build_system_prompt(
         except Exception as _sk_err:
             logger.debug(f"skill injection failed (non-fatal): {_sk_err}")
 
+    # Active skills from the server-side dispatcher (slash invocation,
+    # session pins, triggers, relevance). Their markdown is user-editable and
+    # must live in a user-role untrusted-context message, NEVER in the system
+    # role. Place them right before the latest user turn so the model sees the
+    # procedure next to the request.
+    _active_skill_messages: List[Dict[str, Any]] = []
+    for skill in (active_skills or []):
+        if not (skill.markdown or "").strip():
+            continue
+        label = f"active skill: {skill.name}"
+        content = skill.markdown
+        if skill.inject_mode == "directive":
+            content = f"Follow this directive exactly.\n\n{content}\n\nFollow this directive exactly."
+        _active_skill_messages.append(untrusted_context_message(label, content))
+
     agent_msg = {"role": "system", "content": agent_prompt}
     insert_idx = 0
     for i, msg in enumerate(messages):
@@ -1332,6 +1365,13 @@ def _build_system_prompt(
     if _skills_message:
         merged.insert(last_user_idx, _skills_message)
         last_user_idx += 1
+    if _active_skill_messages:
+        merged = (
+            merged[:last_user_idx]
+            + _active_skill_messages
+            + merged[last_user_idx:]
+        )
+        last_user_idx += len(_active_skill_messages)
     if _datetime_message:
         merged.insert(last_user_idx, _datetime_message)
 
@@ -1831,6 +1871,7 @@ async def stream_agent_loop(
     approved_plan: Optional[str] = None,
     tool_policy: Optional[ToolPolicy] = None,
     workspace: Optional[str] = None,
+    project_skills_manager: Optional[Any] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -2031,6 +2072,57 @@ async def stream_agent_loop(
 
     prep_timings["tool_selection"] = time.time() - _t1
 
+    # Active skill dispatch: server-side source of truth for which skills
+    # apply this turn (slash, session-pinned, project-pinned, triggers,
+    # relevance). Their markdown is injected as untrusted user-role context
+    # below; here we apply their declared tool gating to the selected set.
+    _active_skills: List[ResolvedSkill] = []
+    _t1_dispatch = time.time()
+    try:
+        from services.memory.skills import SkillsManager
+        from src.constants import DATA_DIR
+
+        _skills_enabled = True
+        try:
+            from routes.prefs_routes import _load_for_user as _load_prefs
+
+            _skills_enabled = bool((_load_prefs(owner) or {}).get("skills_enabled", True))
+        except Exception:
+            pass
+        if _skills_enabled:
+            _global_skills_manager = SkillsManager(DATA_DIR)
+            _project_skills_manager = project_skills_manager
+            if _project_skills_manager is None and workspace:
+                _project_skills_manager = SkillsManager(workspace)
+            _dispatcher = SkillDispatcher(
+                _global_skills_manager,
+                project_skills_manager=_project_skills_manager,
+            )
+            _active_skills = _dispatcher.resolve_active_skills(
+                _last_user,
+                session_id=session_id,
+                owner=owner,
+                workspace=workspace,
+                pinned_names=get_active_skills(session_id),
+            )
+            for skill in _active_skills:
+                for t in skill.tools_disabled or []:
+                    disabled_tools.add(t)
+                if not guide_only and _relevant_tools is not None:
+                    for t in skill.tools_required or []:
+                        if t not in disabled_tools:
+                            _relevant_tools.add(t)
+            if _active_skills:
+                logger.info(
+                    "[active-skills] resolved=%s required=%s disabled=%s",
+                    [s.name for s in _active_skills],
+                    sorted({t for s in _active_skills for t in (s.tools_required or [])}),
+                    sorted({t for s in _active_skills for t in (s.tools_disabled or [])}),
+                )
+    except Exception as _e:
+        logger.warning("[active-skills] dispatch failed: %s", _e)
+    prep_timings["skill_dispatch"] = time.time() - _t1_dispatch
+
     _t2 = time.time()
     # Hosted-API match by URL, OR the model name looks like a recent model
     # known to follow OpenAI-style function calling (DeepSeek, GPT*, Claude,
@@ -2110,6 +2202,7 @@ async def stream_agent_loop(
         owner=owner,
         suppress_local_context=guide_only,
         active_email=active_email,
+        active_skills=_active_skills,
     )
     if plan_mode and not guide_only:
         # Steer the model to investigate-then-propose. Hard tool gating handles
