@@ -328,6 +328,11 @@ class SkillsManager:
         # Normalize name
         nm = slugify(name or title or description or "skill")
 
+        if inject_mode not in ("procedure", "directive"):
+            raise ValueError(
+                f"Invalid inject_mode {inject_mode!r}; must be 'procedure' or 'directive'."
+            )
+
         # Free dedup-at-creation (always, no API): for LLM-authored skills,
         # skip if a near-identical skill already exists (Jaccard over
         # name+description+when_to_use+procedure). User-authored skills are
@@ -383,7 +388,7 @@ class SkillsManager:
             pinned=bool(pinned),
             temperature=temperature,
             max_tokens=max_tokens,
-            inject_mode=inject_mode if inject_mode in ("procedure", "directive") else "procedure",
+            inject_mode=inject_mode,
             status=status or "draft",
             confidence=float(confidence),
             source=source,
@@ -468,6 +473,11 @@ class SkillsManager:
                 continue
             if (sk.owner or "") != (owner or ""):
                 continue
+
+            if "inject_mode" in updates and updates["inject_mode"] not in ("procedure", "directive"):
+                raise ValueError(
+                    f"Invalid inject_mode {updates['inject_mode']!r}; must be 'procedure' or 'directive'."
+                )
 
             old_dir = os.path.dirname(path)
 

@@ -220,6 +220,17 @@ def _as_bool(v: Any, default: bool = False) -> bool:
     return default
 
 
+def _is_default_scalar(key: str, value: Any) -> bool:
+    """Return True if `value` is the default this schema would elide for new skills."""
+    if key == "priority" and value == 0:
+        return True
+    if key == "pinned" and value is False:
+        return True
+    if key == "inject_mode" and value == "procedure":
+        return True
+    return False
+
+
 # Canonical frontmatter key order for skills created from scratch.
 _DEFAULT_FM_ORDER = (
     "name", "description", "version", "category",
@@ -405,10 +416,9 @@ class Skill:
         if self.examples:              fm["examples"] = list(self.examples)
         if self.tools_required:        fm["tools_required"] = list(self.tools_required)
         if self.tools_disabled:        fm["tools_disabled"] = list(self.tools_disabled)
-        if self.priority:              fm["priority"] = int(self.priority)
-        if self.pinned is True:        fm["pinned"] = True
-        if self.inject_mode != "procedure":
-            fm["inject_mode"] = self.inject_mode
+        fm["priority"] = int(self.priority)
+        fm["pinned"] = bool(self.pinned)
+        fm["inject_mode"] = self.inject_mode
         if self.temperature is not None:
             fm["temperature"] = float(self.temperature)
         if self.max_tokens is not None:
@@ -423,7 +433,13 @@ class Skill:
 
     def to_frontmatter(self) -> Dict[str, Any]:
         all_values = self._frontmatter_values()
-        order = list(self._fm_order) if self._fm_order else list(_DEFAULT_FM_ORDER)
+        source_keys = set(self._fm_order)
+        # Honor source order first; newly-created skills with no recorded source
+        # order fall back to the canonical order.
+        order = list(self._fm_order)
+        for key in _DEFAULT_FM_ORDER:
+            if key not in order:
+                order.append(key)
         fm: Dict[str, Any] = {}
         for key in order:
             if key not in all_values:
@@ -431,13 +447,20 @@ class Skill:
             v = all_values[key]
             if v is None or v == [] or v == "":
                 continue
+            # Drop scalar defaults for skills that never declared the field,
+            # but keep the line when the source explicitly contained it.
+            if key not in source_keys and _is_default_scalar(key, v):
+                continue
             fm[key] = v
         # Any values added after parsing (or fields not in the canonical order)
-        # are appended at the end so nothing is silently dropped.
+        # are appended at the end so nothing is silently dropped.  Apply the
+        # same default-elision rule for canonical scalar keys.
         for key, v in all_values.items():
             if key in fm:
                 continue
             if v is None or v == [] or v == "":
+                continue
+            if key not in source_keys and _is_default_scalar(key, v):
                 continue
             fm[key] = v
         return fm
@@ -513,8 +536,9 @@ class Skill:
         if max_tokens_raw is None or max_tokens_raw == "":
             max_tokens = None
         else:
-            max_tokens = _as_int(max_tokens_raw, default=0)
-            if max_tokens == 0:
+            try:
+                max_tokens = int(max_tokens_raw)
+            except (TypeError, ValueError):
                 max_tokens = None
 
         return cls(

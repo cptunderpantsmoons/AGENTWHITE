@@ -150,3 +150,55 @@ def test_to_dict_includes_new_fields():
     assert d["temperature"] == sk.temperature
     assert d["max_tokens"] == sk.max_tokens
     assert d["inject_mode"] == sk.inject_mode
+
+
+def test_max_tokens_zero_preserved():
+    yaml = _NEW_FIELDS_YAML.replace("max_tokens: 4096", "max_tokens: 0")
+    sk = Skill.from_markdown(yaml)
+    assert sk.max_tokens == 0
+
+    md = sk.to_markdown()
+    assert "max_tokens: 0" in md
+
+    sk2 = Skill.from_markdown(md)
+    assert sk2.max_tokens == 0
+
+
+def test_explicit_default_scalar_values_round_trip():
+    yaml = """\
+---
+name: explicit-defaults
+description: Defaults written explicitly.
+priority: 0
+pinned: false
+inject_mode: procedure
+status: draft
+---
+
+## Procedure
+
+1. Do nothing
+"""
+    sk = Skill.from_markdown(yaml)
+    assert sk.priority == 0
+    assert sk.pinned is False
+    assert sk.inject_mode == "procedure"
+
+    md = sk.to_markdown()
+    assert "priority: 0" in md
+    assert "pinned: false" in md
+    assert "inject_mode: procedure" in md
+
+    sk2 = Skill.from_markdown(md)
+    assert sk2.priority == 0
+    assert sk2.pinned is False
+    assert sk2.inject_mode == "procedure"
+
+
+def test_new_skill_elides_default_scalar_values():
+    """Skills created from scratch should not emit priority:0/pinned:false/inject_mode:procedure."""
+    sk = Skill(name="fresh", description="A brand new skill.")
+    fm = sk.to_frontmatter()
+    assert "priority" not in fm
+    assert "pinned" not in fm
+    assert "inject_mode" not in fm
