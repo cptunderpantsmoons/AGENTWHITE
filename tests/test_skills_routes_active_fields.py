@@ -252,15 +252,136 @@ async def test_update_skill_clears_optional_fields_with_none(tmp_path):
     assert loaded["temperature"] == 0.5
     assert loaded["max_tokens"] == 512
 
-    # Now clear them. Note: Pydantic's exclude_none=True would drop the None,
-    # so the route needs to use exclude_unset or accept the explicit None.
-    # The current route uses exclude_none, so this test documents that
-    # limitation — the editor sends temperature:"" (empty string) instead,
-    # which the form collector converts to null on the client side and the
-    # structured PUT omits entirely. The field stays at its prior value
-    # until the user saves a non-empty value.
-    # (This is the same behaviour as the existing route — left as-is so
-    # the structured form doesn't introduce a regression.)
+    # Now clear them by sending explicit None. The route MUST treat the
+    # explicit None as "clear this field" — using exclude_none=True drops
+    # the None before it reaches SkillsManager, leaving the prior value
+    # in place. exclude_unset=True (or an explicit sentinel) preserves the
+    # explicit None so SkillsManager.update_skill writes None to disk.
+    await update(
+        _request("alice"),
+        "clearable",
+        SkillUpdateRequest(temperature=None, max_tokens=None),
+    )
+    loaded = next(s for s in sm.load(owner="alice") if s["name"] == "clearable")
+    assert loaded["temperature"] is None
+    assert loaded["max_tokens"] is None
+
+
+# --------------------------------------------------------------------------
+# Server-side tool-name validation backstop
+# --------------------------------------------------------------------------
+
+# A tool name that is genuinely unknown to the agent — guaranteed not to
+# appear in known_tool_names() so we don't have to mock the registry.
+_UNKNOWN_TOOL = "this_tool_does_not_exist_anywhere_xyzzy_42"
+
+
+@pytest.mark.asyncio
+async def test_update_skill_rejects_unknown_tool_required(tmp_path):
+    """Server-side backstop: PUT with an unknown name in tools_required
+    returns HTTP 400 even if the client-side validator was bypassed."""
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(skills_root, name="gate-skill", owner="alice")
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    update = _route_handler(router, "/api/skills/{skill_id}", "PUT")
+
+    with pytest.raises(HTTPException) as exc:
+        await update(
+            _request("alice"),
+            "gate-skill",
+            SkillUpdateRequest(tools_required=[_UNKNOWN_TOOL]),
+        )
+    assert exc.value.status_code == 400
+    assert _UNKNOWN_TOOL in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_update_skill_rejects_unknown_tool_disabled(tmp_path):
+    """Server-side backstop: PUT with an unknown name in tools_disabled
+    returns HTTP 400."""
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(skills_root, name="gate-skill", owner="alice")
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    update = _route_handler(router, "/api/skills/{skill_id}", "PUT")
+
+    with pytest.raises(HTTPException) as exc:
+        await update(
+            _request("alice"),
+            "gate-skill",
+            SkillUpdateRequest(tools_disabled=[_UNKNOWN_TOOL]),
+        )
+    assert exc.value.status_code == 400
+    assert _UNKNOWN_TOOL in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_update_skill_accepts_known_tool_names(tmp_path):
+    """Sanity: PUT with known tool names does NOT raise."""
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(skills_root, name="gate-skill", owner="alice")
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    update = _route_handler(router, "/api/skills/{skill_id}", "PUT")
+
+    result = await update(
+        _request("alice"),
+        "gate-skill",
+        SkillUpdateRequest(tools_required=["bash"], tools_disabled=["read_file"]),
+    )
+    assert result == {"ok": True}
+    loaded = next(s for s in sm.load(owner="alice") if s["name"] == "gate-skill")
+    assert loaded["tools_required"] == ["bash"]
+    assert loaded["tools_disabled"] == ["read_file"]
+
+
+@pytest.mark.asyncio
+async def test_add_skill_rejects_unknown_tool_required(tmp_path):
+    """Server-side backstop: POST /add with an unknown name in
+    tools_required returns HTTP 400."""
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    add = _route_handler(router, "/api/skills/add", "POST")
+
+    with pytest.raises(HTTPException) as exc:
+        await add(
+            _request("alice"),
+            SkillAddRequest(
+                name="bad-tool",
+                description="bad",
+                tools_required=[_UNKNOWN_TOOL],
+            ),
+        )
+    assert exc.value.status_code == 400
+    assert _UNKNOWN_TOOL in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_add_skill_rejects_unknown_tool_disabled(tmp_path):
+    """Server-side backstop: POST /add with an unknown name in
+    tools_disabled returns HTTP 400."""
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    add = _route_handler(router, "/api/skills/add", "POST")
+
+    with pytest.raises(HTTPException) as exc:
+        await add(
+            _request("alice"),
+            SkillAddRequest(
+                name="bad-tool",
+                description="bad",
+                tools_disabled=[_UNKNOWN_TOOL],
+            ),
+        )
+    assert exc.value.status_code == 400
+    assert _UNKNOWN_TOOL in str(exc.value.detail)
 
 
 # --------------------------------------------------------------------------
@@ -309,3 +430,63 @@ async def test_tool_registry_anonymous_ok_when_auth_disabled(monkeypatch, tmp_pa
     result = await list_tools(_request(None))
     assert result["ok"] is True
     assert "bash" in result["tools"]
+
+
+# --------------------------------------------------------------------------
+# POST /api/skills/{skill_id}/markdown — server-side tool-name backstop
+# --------------------------------------------------------------------------
+
+
+class _MarkdownRequest:
+    """Minimal stand-in for a Starlette Request carrying a JSON body.
+
+    The markdown route reads ``request.headers`` and calls
+    ``await request.json()``; we mock both. The owner is injected via a
+    monkeypatched ``get_current_user`` (see the test below).
+    """
+
+    def __init__(self, markdown: str):
+        self._body = {"markdown": markdown}
+
+    @property
+    def headers(self):
+        return {"content-type": "application/json"}
+
+    async def json(self):
+        return self._body
+
+
+@pytest.mark.asyncio
+async def test_save_skill_markdown_rejects_unknown_tool(monkeypatch, tmp_path):
+    """Server-side backstop: POST /{skill_id}/markdown with a frontmatter
+    tools_required list containing an unknown name must return HTTP 400
+    before the skill is persisted."""
+    import routes.skills_routes as skills_routes_module
+    monkeypatch.setattr(skills_routes_module, "get_current_user", lambda request: "alice")
+
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(skills_root, name="md-skill", owner="alice")
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    save_md = _route_handler(router, "/api/skills/{skill_id}/markdown", "POST")
+
+    bad_md = textwrap.dedent("""\
+        ---
+        name: md-skill
+        description: test
+        tools_required: [bash, this_tool_does_not_exist_anywhere_xyzzy_42]
+        ---
+
+        # Procedure
+        - step
+        """)
+    with pytest.raises(HTTPException) as exc:
+        await save_md(_MarkdownRequest(bad_md), "md-skill")
+    assert exc.value.status_code == 400
+    assert "this_tool_does_not_exist_anywhere_xyzzy_42" in str(exc.value.detail)
+    # Verify nothing was written: the skill on disk still has no
+    # tools_required frontmatter key.
+    loaded = next(s for s in sm.load(owner="alice") if s["name"] == "md-skill")
+    assert loaded.get("tools_required") in (None, [])

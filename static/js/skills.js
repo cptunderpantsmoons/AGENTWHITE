@@ -1062,9 +1062,12 @@ async function _loadToolRegistry() {
       _toolRegistry = new Set(Array.isArray(data.tools) ? data.tools : []);
       return _toolRegistry;
     } catch (e) {
-      // Fall back to an empty set — the validator will treat all tool names
-      // as unknown and surface them to the user, which is safer than
-      // silently allowing names we couldn't verify.
+      // Fall back to an empty set — the validator FAILS CLOSED: any
+      // non-empty tools_required/tools_disabled list is rejected because
+      // the names cannot be verified against the registry. An empty list
+      // (no gating) is still allowed regardless of registry state.
+      // This prevents a fetch failure from silently letting invalid tool
+      // names through (tool gating narrows, never elevates).
       _toolRegistry = new Set();
       return _toolRegistry;
     }
@@ -1236,10 +1239,18 @@ function _validateActiveSkillForm(form) {
     return { ok: false, error: `Invalid inject_mode: ${injectMode}` };
   }
   // Tool gating narrows, never elevates: unknown names are rejected.
-  if (_toolRegistry && _toolRegistry.size) {
-    const unknown = [...new Set([...required, ...disabled])].filter(t => !_toolRegistry.has(t));
-    if (unknown.length) {
-      return { ok: false, error: `Unknown tool name(s): ${unknown.join(', ')}` };
+  // Fail closed: when the registry failed to load (empty Set), treat it
+  // as "no known tools" and reject ANY non-empty tools_required /
+  // tools_disabled list. An empty list (no gating) is always valid
+  // regardless of registry state — the validator only blocks names we
+  // cannot verify against the registry.
+  if (_toolRegistry) {
+    const allNames = [...new Set([...required, ...disabled])];
+    if (allNames.length) {
+      const unknown = allNames.filter(t => !_toolRegistry.has(t));
+      if (unknown.length) {
+        return { ok: false, error: `Unknown tool name(s): ${unknown.join(', ')}` };
+      }
     }
   }
   // Validate numeric inputs parse cleanly when present.
@@ -1343,10 +1354,7 @@ function _pinPill(sk, name) {
 // Wire pin/unpin clicks on the rendered cards. Delegated so it survives re-render.
 function _wirePinButtons() {
   const container = document.getElementById('skills-list');
-  if (!container || container._pinWired) {
-    if (container) container._pinWired = true;
-    return;
-  }
+  if (!container || container._pinWired) return;
   container._pinWired = true;
   container.addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-skill-pin]');
@@ -1521,7 +1529,14 @@ function _syncFormToFrontmatter(form, textarea) {
 function _formatFrontmatterLine(key, value) {
   if (Array.isArray(value)) {
     if (!value.length) return `${key}: []`;
-    return `${key}: [${value.map(v => String(v).includes(',') ? JSON.stringify(v) : v).join(', ')}]`;
+    // Quote array items containing YAML-special characters so the server's
+    // Skill.from_markdown parser doesn't choke on them. ',' would break
+    // the inline-list split; ':' reads as a nested mapping; '[' / '{'
+    // look like flow collections; '"' / "'" need quoting to be valid
+    // scalars. Bare numbers, simple identifiers, and dash-separated
+    // slugs are emitted as-is for readability.
+    const needsQuote = v => /[:,\[\]\{\}"']/.test(String(v));
+    return `${key}: [${value.map(v => needsQuote(v) ? JSON.stringify(String(v)) : v).join(', ')}]`;
   }
   if (typeof value === 'boolean') return `${key}: ${value}`;
   if (typeof value === 'number') return `${key}: ${value}`;

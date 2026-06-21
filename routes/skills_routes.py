@@ -136,6 +136,54 @@ class SkillUpdateRequest(BaseModel):
     steps: Optional[List[str]] = None
 
 
+def _validate_tool_names(*lists) -> None:
+    """Reject unknown tool names in tools_required / tools_disabled.
+
+    Server-side backstop for the client-side validator: even if the
+    editor's ``_validateActiveSkillForm`` is bypassed (registry fetch
+    failure, hand-crafted PUT/POST, third-party client), the route still
+    rejects unknown names with HTTP 400 before they reach
+    ``SkillsManager``. Tool gating narrows, never elevates — an unknown
+    name silently dropped by the dispatcher would widen the gate.
+
+    Uses ``src.tool_policy.known_tool_names`` as the single source of
+    truth so the route's allowlist matches what the runtime actually
+    enforces. Raises ``HTTPException(400)`` on the first unknown name
+    found (caller passes one or more lists; empty / None lists are
+    no-ops).
+    """
+    known: set
+    try:
+        from src.tool_policy import known_tool_names
+        known = set(known_tool_names())
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("tool-name validation failed to load registry: %s", e)
+        raise HTTPException(500, "Could not load tool registry") from e
+    if not known:
+        # Fail closed: an empty registry means we cannot vouch for ANY
+        # name, so reject any non-empty list. An empty list (no gating)
+        # is always valid regardless of registry state.
+        for lst in lists:
+            for name in (lst or []):
+                if name:
+                    raise HTTPException(
+                        400,
+                        f"Unknown tool name(s): {name} (tool registry unavailable)",
+                    )
+        return
+    unknown: list = []
+    seen: set = set()
+    for lst in lists:
+        for name in (lst or []):
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            if name not in known:
+                unknown.append(name)
+    if unknown:
+        raise HTTPException(400, f"Unknown tool name(s): {', '.join(unknown)}")
+
+
 def _skill_test_task(skill: dict) -> str:
     """Build a self-contained test task. Many skills act ON something (a doc,
     an email); if we just hand over the 'when to use' text the agent has nothing
@@ -1566,6 +1614,13 @@ def setup_skills_routes(
     @router.post("/add")
     async def add_skill(request: Request, body: SkillAddRequest):
         user = _owner(request)
+        # Server-side backstop: reject unknown tool names BEFORE they reach
+        # SkillsManager so the on-disk skill can never carry a tool gate
+        # the dispatcher would silently drop (tool gating narrows, never
+        # elevates). The client-side validator checks the same set, but
+        # this guards against a fetch failure, a hand-crafted POST, or a
+        # third-party client.
+        _validate_tool_names(body.tools_required, body.tools_disabled)
         entry = skills_manager.add_skill(
             # New shape
             name=body.name,
@@ -1880,6 +1935,11 @@ def setup_skills_routes(
         sk.name = match.get("name")
         if not sk.owner:
             sk.owner = match.get("owner") or user
+        # Server-side backstop: reject unknown tool names parsed out of the
+        # raw frontmatter so a hand-edited SKILL.md can't carry a tool gate
+        # the dispatcher would silently drop (tool gating narrows, never
+        # elevates). The structured PUT/POST /add paths check the same set.
+        _validate_tool_names(sk.tools_required, sk.tools_disabled)
         ok = skills_manager.update_skill(match.get("name"), {
             "name": sk.name,
             "description": sk.description,
@@ -1932,7 +1992,18 @@ def setup_skills_routes(
             raise HTTPException(404, "Skill not found")
         _verify_owner(match, user)
 
-        updates = body.dict(exclude_none=True)
+        # Server-side backstop: reject unknown tool names BEFORE they reach
+        # SkillsManager (tool gating narrows, never elevates). The editor's
+        # client-side validator checks the same set; this guards against a
+        # fetch failure, a hand-crafted PUT, or a third-party client.
+        _validate_tool_names(body.tools_required, body.tools_disabled)
+
+        # Use exclude_unset=True (NOT exclude_none) so the caller can
+        # explicitly send `temperature: null` / `max_tokens: null` to
+        # CLEAR an optional field. exclude_none drops nulls, which would
+        # silently leave the prior value in place. The editor's form
+        # collector sends null when the user empties the input.
+        updates = body.dict(exclude_unset=True)
         if not updates:
             return {"ok": True}
         ok = skills_manager.update_skill(match.get("name"), updates, owner=user)
