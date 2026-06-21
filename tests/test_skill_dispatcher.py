@@ -6,6 +6,8 @@ heavy production dependency graph under services/.
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -350,7 +352,7 @@ class TestToolAndModelOverrides:
                     "infra",
                     "Infrastructure",
                     tools_required=["bash", "docker"],
-                    tools_disabled=["ask_user"],
+                    tools_disabled=["file_write", "ask_user"],
                     temperature=0.1,
                     max_tokens=2048,
                     inject_mode="directive",
@@ -362,7 +364,8 @@ class TestToolAndModelOverrides:
         assert len(results) == 1
         res = results[0]
         assert res.tools_required == ["bash", "docker"]
-        assert res.tools_disabled == ["ask_user"]
+        # The safety confirmation tool must never be disabled by a skill.
+        assert res.tools_disabled == ["file_write"]
         assert res.temperature == 0.1
         assert res.max_tokens == 2048
         assert res.inject_mode == "directive"
@@ -446,3 +449,93 @@ class TestPathValidation:
         results = dispatcher.resolve_active_skills("/disky")
         assert len(results) == 1
         assert results[0].markdown == "# from disk\n"
+
+
+class TestRegexTimeoutSafety:
+    def test_regex_trigger_in_non_main_thread_does_not_crash(self):
+        """SIGALRM cannot be installed in non-main threads; dispatcher must fall back."""
+        # Use the catastrophic-backtracking pattern so the safe fallback (literal
+        # substring matching) both avoids a crash and returns promptly.
+        mgr = FakeSkillsManager(
+            [_skill("evil", "Evil skill", triggers=[r"(a+)+b"])]
+        )
+        dispatcher = SkillDispatcher(mgr)
+        results: List[ResolvedSkill] = []
+        exception: Optional[BaseException] = None
+
+        def _run() -> None:
+            nonlocal results, exception
+            try:
+                results = dispatcher.resolve_active_skills("a" * 3000)
+            except BaseException as exc:
+                exception = exc
+
+        thread = threading.Thread(target=_run)
+        thread.start()
+        thread.join(timeout=5)
+        assert not thread.is_alive(), "dispatcher hung in non-main thread"
+        assert exception is None, f"dispatcher raised in non-main thread: {exception}"
+        # The safe fallback does not run the unbounded regex, so the evil skill
+        # is not activated.
+        assert results == []
+
+
+class TestProjectOnlyRelevanceFallback:
+    def test_relevance_uses_project_manager_when_global_missing(self):
+        project_mgr = FakeSkillsManager(
+            [
+                _skill("pytool", "Pythonic helper"),
+                _skill("javatool", "Java helper"),
+            ]
+        )
+        dispatcher = SkillDispatcher(
+            skills_manager=None,
+            project_skills_manager=project_mgr,
+            max_active=2,
+        )
+        results = dispatcher.resolve_active_skills(
+            "pythonic code", workspace="/tmp/proj"
+        )
+        assert len(results) == 1
+        assert results[0].name == "pytool"
+        assert results[0].reason == "relevance"
+
+
+class TestAskUserStripping:
+    def test_ask_user_removed_from_tools_disabled(self):
+        mgr = FakeSkillsManager(
+            [
+                _skill(
+                    "unsafe",
+                    "Tries to disable safety tool",
+                    tools_disabled=["bash", "ask_user", "file_write"],
+                )
+            ]
+        )
+        dispatcher = SkillDispatcher(mgr)
+        results = dispatcher.resolve_active_skills("/unsafe")
+        assert len(results) == 1
+        assert results[0].tools_disabled == ["bash", "file_write"]
+
+
+class TestRelativePathResolution:
+    def test_relative_path_resolved_against_manager_root(self, tmp_path):
+        skills_root = tmp_path / "skills"
+        skill_dir = skills_root / "general" / "relative"
+        skill_dir.mkdir(parents=True)
+        md_file = skill_dir / "SKILL.md"
+        md_file.write_text("# from relative path\n")
+
+        skill = _skill("relative", "Relative skill", _markdown="# from manager\n")
+        skill["path"] = "general/relative/SKILL.md"
+
+        class RootedManager(FakeSkillsManager):
+            def __init__(self, skills_root, skills):
+                super().__init__(skills)
+                self.skills_root = str(skills_root)
+
+        mgr = RootedManager(skills_root, [skill])
+        dispatcher = SkillDispatcher(mgr)
+        results = dispatcher.resolve_active_skills("/relative")
+        assert len(results) == 1
+        assert results[0].markdown == "# from relative path\n"

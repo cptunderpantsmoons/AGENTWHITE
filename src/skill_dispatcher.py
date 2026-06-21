@@ -209,12 +209,24 @@ class SkillDispatcher:
         results.append(self._resolve(skill, reason))
         seen.add(name)
 
+    _SAFETY_TOOL = "ask_user"
+
     def _resolve(self, skill: Dict[str, Any], reason: str) -> ResolvedSkill:
+        name = skill["name"]
+        tools_disabled = list(skill.get("tools_disabled") or [])
+        if self._SAFETY_TOOL in tools_disabled:
+            logger.warning(
+                "Skill %r attempted to disable the %r safety tool; stripping it",
+                name,
+                self._SAFETY_TOOL,
+            )
+            tools_disabled = [t for t in tools_disabled if t != self._SAFETY_TOOL]
+
         return ResolvedSkill(
-            name=skill["name"],
+            name=name,
             markdown=self._read_markdown(skill),
             tools_required=list(skill.get("tools_required") or []),
-            tools_disabled=list(skill.get("tools_disabled") or []),
+            tools_disabled=tools_disabled,
             temperature=skill.get("temperature"),
             max_tokens=skill.get("max_tokens"),
             inject_mode=str(skill.get("inject_mode") or "procedure"),
@@ -225,16 +237,25 @@ class SkillDispatcher:
         """Return the full SKILL.md text for a loaded skill.
 
         Prefers reading from the skill's ``path`` only after confirming the
-        resolved path lives inside a known skills directory; falls back to
-        the source manager's ``read_skill_md`` method.
+        resolved path lives inside a known skills directory. Relative ``path``
+        values are resolved against the source manager's skills root rather
+        than the process CWD. Falls back to the source manager's
+        ``read_skill_md`` method.
         """
         path = skill.get("path")
-        if path and self._is_path_in_allowed_root(path):
-            try:
-                with open(path, encoding="utf-8") as f:
-                    return f.read()
-            except Exception:
-                logger.warning("Failed to read skill markdown from %s", path)
+        if path:
+            if not os.path.isabs(str(path)):
+                source_root = self._manager_skills_root(
+                    skill.get("_dispatcher_source")
+                )
+                if source_root:
+                    path = os.path.join(source_root, str(path))
+            if self._is_path_in_allowed_root(path):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        return f.read()
+                except Exception:
+                    logger.warning("Failed to read skill markdown from %s", path)
 
         manager = skill.get("_dispatcher_source") or self.global_manager
         if manager is not None and hasattr(manager, "read_skill_md"):
@@ -245,6 +266,18 @@ class SkillDispatcher:
             except Exception:
                 logger.warning("Failed to read skill markdown via manager")
         return ""
+
+    @staticmethod
+    def _manager_skills_root(manager: Any) -> Optional[str]:
+        """Return the skills root directory for a manager, if any."""
+        if manager is None:
+            return None
+        root = getattr(manager, "skills_root", None)
+        if not root:
+            data_dir = getattr(manager, "data_dir", None)
+            if data_dir:
+                root = os.path.join(data_dir, "skills")
+        return str(root) if root else None
 
     def _allowed_roots(self) -> List[str]:
         """Return the realpaths of directories from which markdown may be read."""
@@ -329,18 +362,21 @@ class SkillDispatcher:
                 return True
         return False
 
+    _REGEX_META_CHARS = frozenset(".*?+^$|()[]{}\\")
+
     @staticmethod
     def _contains_regex_meta(trigger: str) -> bool:
         """Return True if ``trigger`` looks like a regex rather than a literal."""
-        return bool(re.search(r"[.*?+^$|\\()[\]{}]", trigger))
+        return any(ch in SkillDispatcher._REGEX_META_CHARS for ch in str(trigger))
 
     @staticmethod
     def _safe_regex_search(pattern: re.Pattern, text: str, timeout: float):
         """Run ``pattern.search(text)`` with a hard real-time deadline.
 
         Uses ``SIGALRM`` so catastrophic-backtracking C code is interrupted.
-        Returns the match object on success, an exception instance on regex
-        failure, or ``None`` when the deadline expires.
+        Returns the match object on success, an exception instance when regex
+        execution cannot be guarded (e.g. non-main thread or platform without
+        ``SIGALRM``), or ``None`` when the deadline expires.
         """
 
         class _RegexTimeoutError(Exception):
@@ -350,10 +386,14 @@ class SkillDispatcher:
             raise _RegexTimeoutError()
 
         if not hasattr(signal, "SIGALRM"):
-            return pattern.search(text)
+            return ValueError("SIGALRM is not available on this platform")
 
-        old_handler = signal.signal(signal.SIGALRM, _handler)
-        old_timer = signal.setitimer(signal.ITIMER_REAL, timeout)
+        try:
+            old_handler = signal.signal(signal.SIGALRM, _handler)
+            old_timer = signal.setitimer(signal.ITIMER_REAL, timeout)
+        except (ValueError, OSError) as exc:
+            return exc
+
         try:
             return pattern.search(text)
         except _RegexTimeoutError:
@@ -375,17 +415,20 @@ class SkillDispatcher:
         remaining = self.max_active - len(results)
         if remaining <= 0:
             return
-        manager = self.global_manager
-        if manager is None or not hasattr(manager, "get_relevant_skills"):
-            return
-        try:
-            relevant = manager.get_relevant_skills(
-                message,
-                skills=list(by_name.values()),
-                max_items=remaining,
-                threshold=0.3,
-                min_confidence=self.min_confidence,
-            )
-            self._add_stage(list(relevant), "relevance", results, seen)
-        except Exception:
-            logger.exception("Relevance fallback failed")
+        for manager in (self.global_manager, self.project_manager):
+            if manager is None or not hasattr(manager, "get_relevant_skills"):
+                continue
+            try:
+                relevant = manager.get_relevant_skills(
+                    message,
+                    skills=list(by_name.values()),
+                    max_items=remaining,
+                    threshold=0.3,
+                    min_confidence=self.min_confidence,
+                )
+                self._add_stage(list(relevant), "relevance", results, seen)
+            except Exception:
+                logger.exception("Relevance fallback failed")
+            remaining = self.max_active - len(results)
+            if remaining <= 0:
+                break
