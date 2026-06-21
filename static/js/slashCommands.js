@@ -335,12 +335,12 @@ async function _loadSkillSlashCatalog(force = false) {
   }
 }
 
-function _submitComposedMessage(text) {
+function _submitSlashMessage(text) {
   const msgInput = document.getElementById('message');
   const form = document.getElementById('chat-form');
   if (!msgInput || !form) return false;
   // The slash handler and app-level form debounce must both release before
-  // sending the pinned prompt, otherwise the follow-up submit is dropped.
+  // sending the follow-up message, otherwise the form submit is dropped.
   setTimeout(() => {
     msgInput.value = text;
     msgInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -350,19 +350,30 @@ function _submitComposedMessage(text) {
 }
 
 async function _invokeSkillByName(name, requestText, ctx) {
-  const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/invoke`, {
+  // Send the original slash input so the server can store the active skill
+  // and resolve/inject it on the next turn. Do not embed skill markdown here.
+  const originalInput = requestText ? `/${name} ${requestText}` : `/${name}`;
+  const res = await fetch(`${API_BASE}/api/skills/invoke`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ request: requestText || '' })
+    body: JSON.stringify({
+      name,
+      args: requestText || '',
+      session_id: ctx?.sid || ''
+    })
   });
+  if (res.status === 404) {
+    // Unknown skill: fall through to regular chat.
+    return false;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     slashReply(ctx?.esc ? ctx.esc(err?.detail || 'Skill is not available') : 'Skill is not available');
     return true;
   }
   const data = await res.json();
-  if (!data.message || !_submitComposedMessage(data.message)) {
+  if (!data.ok || !_submitSlashMessage(originalInput)) {
     slashReply('Could not start skill invocation.');
   }
   return true;

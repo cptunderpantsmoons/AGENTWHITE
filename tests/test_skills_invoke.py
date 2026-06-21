@@ -1,0 +1,179 @@
+"""Tests for server-side slash skill invocation (POST /api/skills/invoke)."""
+
+from __future__ import annotations
+
+import textwrap
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException, Request
+from fastapi.datastructures import State
+
+from services.memory.skill_format import slugify
+from services.memory.skills import SkillsManager
+from routes.skills_routes import setup_skills_routes, SkillInvokeRequest
+from src import session_skill_state
+
+
+def _write_skill_md(skills_root: Path, *, name: str, owner: str, **fields) -> Path:
+    """Drop a SKILL.md on disk with the given frontmatter fields."""
+    category = fields.get("category", "general")
+    skill_dir = skills_root / slugify(category, fallback="general") / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+
+    triggers = fields.get("triggers", [])
+    tools_required = fields.get("tools_required", [])
+    tools_disabled = fields.get("tools_disabled", [])
+
+    fmLines = [
+        f"name: {name}",
+        f"description: {fields.get('description', name)}",
+        "version: 1.0.0",
+        f"category: {category}",
+        "tags: []",
+        f"status: {fields.get('status', 'published')}",
+        "confidence: 0.8",
+        "source: user",
+        f"owner: {owner}",
+        "created: 2026-01-01T00:00:00Z",
+    ]
+    if triggers:
+        fmLines.append(f"triggers: {triggers}")
+    if tools_required:
+        fmLines.append(f"tools_required: {tools_required}")
+    if tools_disabled:
+        fmLines.append(f"tools_disabled: {tools_disabled}")
+
+    md = textwrap.dedent("""\
+        ---
+        {frontmatter}
+        ---
+
+        # When to use
+        whenever
+
+        # Procedure
+        - run {name}
+        """).format(frontmatter="\n".join(fmLines), name=name)
+
+    path = skill_dir / "SKILL.md"
+    path.write_text(md, encoding="utf-8")
+    return path
+
+
+def _request(user: str | None = "alice") -> Request:
+    class DummyApp:
+        state = State()
+    scope = {
+        "type": "http",
+        "app": DummyApp(),
+        "state": {"current_user": user} if user is not None else {},
+    }
+    return Request(scope=scope)
+
+
+@pytest.fixture(autouse=True)
+def _clear_session_state():
+    """Keep session-skill state isolated between tests."""
+    session_skill_state.clear_active_skill("sess-active")
+    session_skill_state.clear_active_skill("sess-404")
+    session_skill_state.clear_active_skill("sess-403")
+    yield
+    session_skill_state.clear_active_skill("sess-active")
+    session_skill_state.clear_active_skill("sess-404")
+    session_skill_state.clear_active_skill("sess-403")
+
+
+@pytest.mark.asyncio
+async def test_invoke_skill_sets_active_skill_and_returns_metadata(tmp_path):
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+
+    _write_skill_md(
+        skills_root,
+        name="demo-skill",
+        owner="alice",
+        triggers=["demo", "show demo"],
+        tools_required=["bash"],
+        tools_disabled=["ask_user"],
+    )
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    handler = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/skills/invoke" and "POST" in route.methods
+    )
+
+    body = SkillInvokeRequest(name="demo-skill", args="do it", session_id="sess-active")
+    result = await handler(_request("alice"), body)
+
+    assert result["ok"] is True
+    skill = result["skill"]
+    assert skill["name"] == "demo-skill"
+    assert "# Procedure" in skill["markdown"]
+    assert skill["triggers"] == ["demo", "show demo"]
+    assert skill["tools_required"] == ["bash"]
+    # ask_user is a safety tool and must be stripped even if declared disabled.
+    assert skill["tools_disabled"] == []
+    assert session_skill_state.get_active_skills("sess-active") == ["demo-skill"]
+
+
+@pytest.mark.asyncio
+async def test_invoke_unknown_skill_returns_404(tmp_path):
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    handler = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/skills/invoke" and "POST" in route.methods
+    )
+
+    body = SkillInvokeRequest(name="missing-skill", args="", session_id="sess-404")
+    with pytest.raises(HTTPException) as exc_info:
+        await handler(_request("alice"), body)
+    assert exc_info.value.status_code == 404
+    assert session_skill_state.get_active_skills("sess-404") == []
+
+
+@pytest.mark.asyncio
+async def test_invoke_other_owner_skill_returns_403(tmp_path):
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(skills_root, name="private-skill", owner="bob")
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    handler = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/skills/invoke" and "POST" in route.methods
+    )
+
+    body = SkillInvokeRequest(name="private-skill", args="", session_id="sess-403")
+    with pytest.raises(HTTPException) as exc_info:
+        await handler(_request("alice"), body)
+    assert exc_info.value.status_code == 403
+    assert session_skill_state.get_active_skills("sess-403") == []
+
+
+@pytest.mark.asyncio
+async def test_invoke_requires_auth_when_enabled(monkeypatch, tmp_path):
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(skills_root, name="demo-skill", owner="alice")
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    handler = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/skills/invoke" and "POST" in route.methods
+    )
+
+    import routes.skills_routes as skills_routes_module
+    monkeypatch.setattr(skills_routes_module, "_auth_disabled", lambda: False)
+
+    body = SkillInvokeRequest(name="demo-skill", args="", session_id="sess-auth")
+    with pytest.raises(HTTPException) as exc_info:
+        await handler(_request(None), body)
+    assert exc_info.value.status_code == 401

@@ -35,6 +35,7 @@ class ResolvedSkill:
 
     name: str
     markdown: str
+    triggers: List[str] = field(default_factory=list)
     tools_required: List[str] = field(default_factory=list)
     tools_disabled: List[str] = field(default_factory=list)
     temperature: Optional[float] = None
@@ -46,6 +47,7 @@ class ResolvedSkill:
         return {
             "name": self.name,
             "markdown": self.markdown,
+            "triggers": list(self.triggers),
             "tools_required": list(self.tools_required),
             "tools_disabled": list(self.tools_disabled),
             "temperature": self.temperature,
@@ -240,6 +242,7 @@ class SkillDispatcher:
         return ResolvedSkill(
             name=name,
             markdown=self._read_markdown(skill),
+            triggers=list(skill.get("triggers") or []),
             tools_required=list(skill.get("tools_required") or []),
             tools_disabled=tools_disabled,
             temperature=skill.get("temperature"),

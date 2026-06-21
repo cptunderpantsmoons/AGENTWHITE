@@ -17,7 +17,9 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from services.memory.skills import SkillsManager
-from src.auth_helpers import get_current_user
+from src.auth_helpers import _auth_disabled, get_current_user
+from src.session_skill_state import get_active_skills, set_active_skill
+from src.skill_dispatcher import SkillDispatcher
 from core.middleware import require_admin
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,12 @@ class SkillAddRequest(BaseModel):
 
 class SkillImportUrlRequest(BaseModel):
     url: str = Field(..., min_length=8, max_length=2000)
+
+
+class SkillInvokeRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    args: str = Field("", max_length=5000)
+    session_id: Optional[str] = Field(None, max_length=128)
 
 
 class SkillUpdateRequest(BaseModel):
@@ -1075,8 +1083,12 @@ async def run_scheduled_skill_audit(skills_manager: SkillsManager,
     return {"status": "done", "total": len(names), "results": job.get("results", [])}
 
 
-def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
+def setup_skills_routes(
+    skills_manager: SkillsManager,
+    project_skills_manager: Optional[SkillsManager] = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api/skills", tags=["skills"])
+    dispatcher = SkillDispatcher(skills_manager, project_skills_manager)
 
     def _owner(request: Request) -> Optional[str]:
         return get_current_user(request)
@@ -1090,6 +1102,22 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         # short-circuited the comparison. Treat missing owner as not-owned.
         if skill.get("owner") != user:
             raise HTTPException(404, "Skill not found")
+
+    def _skill_exists_for_other_owner(name: str, user: Optional[str]) -> bool:
+        """Return True when ``name`` exists but belongs to someone else.
+
+        Used to distinguish 403 (access denied) from 404 (not found) without
+        leaking owner-scoped skill names across users.
+        """
+        try:
+            all_skills = skills_manager.load_all()
+        except Exception:
+            return False
+        match = next((s for s in all_skills if s.get("name") == name), None)
+        if not match:
+            return False
+        owner = match.get("owner")
+        return bool(owner and owner != user)
 
     def _fire_skill_added(user: Optional[str]):
         try:
@@ -1141,6 +1169,53 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             })
         entries.sort(key=lambda row: row["name"])
         return {"skills": entries, "count": len(entries)}
+
+    @router.post("/invoke")
+    async def invoke_skill_active(request: Request, body: SkillInvokeRequest):
+        """Record a slash skill as active for the session and return its metadata.
+
+        The client still sends the user's original ``/<skill-name> ...`` message
+        on success; downstream code (the agent loop) is responsible for injecting
+        the returned markdown as an untrusted user-role message.
+        """
+        user = _owner(request)
+        if user is None and not _auth_disabled():
+            raise HTTPException(401, "Authentication required")
+
+        slash_input = f"/{body.name}"
+        if body.args:
+            slash_input += f" {body.args}"
+
+        # Project-local roots are Phase 3; pass workspace=None to fall back to
+        # global skills for now. Session-pinned skills are included so repeated
+        # slash calls still resolve correctly.
+        resolved = dispatcher.resolve_active_skills(
+            slash_input,
+            session_id=body.session_id,
+            owner=user,
+            workspace=None,
+            pinned_names=get_active_skills(body.session_id),
+        )
+
+        if not resolved or resolved[0].reason != "slash":
+            if _skill_exists_for_other_owner(body.name, user):
+                raise HTTPException(403, "Access denied")
+            raise HTTPException(404, "Skill not found")
+
+        skill = resolved[0]
+        try:
+            skills_manager.record_use(skill.name, owner=user)
+        except Exception:
+            logger.warning("Failed to record skill use for %s", skill.name, exc_info=True)
+
+        set_active_skill(body.session_id, skill.name)
+        logger.info(
+            "Active skill set for session %s: %s (owner=%s)",
+            body.session_id,
+            skill.name,
+            user,
+        )
+        return {"ok": True, "skill": skill.to_dict()}
 
     @router.get("/builtin")
     async def list_builtin_skills(request: Request):
