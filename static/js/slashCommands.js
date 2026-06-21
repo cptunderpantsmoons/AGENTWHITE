@@ -35,6 +35,7 @@ let setupIntroShown = false;
 let _addMessage = chatRenderer.addMessage;
 let _hideWelcomeScreen = chatRenderer.hideWelcomeScreen;
 let _isStreamingFn = () => false;  // callback to check streaming state
+let _sendMessageFn = null;         // direct chat send function from chat.js
 
 // API key patterns for provider auto-detection
 const PROVIDER_PATTERNS = [
@@ -373,7 +374,18 @@ async function _invokeSkillByName(name, requestText, ctx) {
     return true;
   }
   const data = await res.json();
-  if (!data.ok || !_submitSlashMessage(originalInput)) {
+  if (!data.ok) {
+    slashReply('Could not start skill invocation.');
+    return true;
+  }
+  // Strip the leading "/<skill-name>" and send the remaining request text
+  // through the normal chat path. Do not resubmit the slash-prefixed input,
+  // because every form submit is routed through handleSlashCommand and would
+  // recursively invoke the skill again.
+  const strippedInput = requestText || '';
+  if (_sendMessageFn) {
+    _sendMessageFn(strippedInput);
+  } else if (!_submitSlashMessage(originalInput)) {
     slashReply('Could not start skill invocation.');
   }
   return true;
@@ -6406,10 +6418,12 @@ async function handleSlashCommand(input) {
  * @param {object} deps - Dependencies from chat.js
  * @param {string} deps.apiBase - The API base URL
  * @param {function} deps.isStreaming - Callback returning current streaming state
+ * @param {function} deps.sendMessage - Direct chat send function for skill follow-ups
  */
 export function initSlashCommands(deps) {
   API_BASE = deps.apiBase || '';
   if (deps.isStreaming) _isStreamingFn = deps.isStreaming;
+  if (deps.sendMessage) _sendMessageFn = deps.sendMessage;
 
   // Global delegation for onboarding and setup clicks
   document.addEventListener('click', (e) => {

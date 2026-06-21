@@ -179,7 +179,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
    */
   export function init(apiBase) {
     API_BASE = apiBase;
-    initSlashCommands({ apiBase, isStreaming: () => isStreaming });
+    initSlashCommands({ apiBase, isStreaming: () => isStreaming, sendMessage: sendChatMessage });
     // Initialize email inbox
     emailInbox.init(documentModule);
     // Wire the slash-command autocomplete popup on the chat composer. The
@@ -460,7 +460,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     if (!msg.trim() && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
 
     // --- Slash commands: execute directly without AI (no session needed) ---
-    if (isCommand(msg.trim())) {
+    if (isCommand(msg.trim()) && !e._skipSlash) {
       const handled = await handleSlashCommand(msg.trim());
       if (handled) {
         el('message').value = '';
@@ -605,7 +605,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
 
       const userDisplay = _displayOverride || msg;
       _displayOverride = null;
-      const skipBubble = _hideUserBubble;
+      const skipBubble = e._skipBubble || _hideUserBubble;
       _hideUserBubble = false;
       // Auto-recovery counter: carries across a turn's auto-continues, but resets
       // when the user genuinely sends a new message (so each task gets a fresh cap).
@@ -3114,6 +3114,20 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         }
       }, 3000);
     }
+  }
+
+  /**
+   * Send a chat message directly, bypassing slash-command handling.
+   * Used by the slash skill dispatcher to submit the request text with
+   * the leading "/<skill-name>" already stripped.
+   */
+  export async function sendChatMessage(text) {
+    const msgInput = uiModule.el('message');
+    if (msgInput) {
+      msgInput.value = text;
+      msgInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    return await handleChatSubmit({ preventDefault: () => {}, _skipSlash: true, _skipBubble: true });
   }
 
   /**
