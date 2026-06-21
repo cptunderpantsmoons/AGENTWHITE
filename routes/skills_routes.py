@@ -18,6 +18,11 @@ from pydantic import BaseModel, Field
 
 from services.memory.skills import SkillsManager
 from src.auth_helpers import _auth_disabled, get_current_user
+from src.session_skill_pins import (
+    list_pinned_skills,
+    pin_skill,
+    unpin_skill,
+)
 from src.session_skill_state import get_active_skills, set_active_skill
 from src.skill_dispatcher import SkillDispatcher
 from core.middleware import require_admin
@@ -62,6 +67,25 @@ class SkillImportUrlRequest(BaseModel):
 class SkillInvokeRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     args: str = Field("", max_length=5000)
+    session_id: Optional[str] = Field(None, max_length=128)
+
+
+class SkillPinRequest(BaseModel):
+    """Pin a skill to a session so it stays active across turns.
+
+    Pins are additive: pinning a different skill does NOT replace an
+    existing pin (Task 6 Quality Gate #4). Use ``POST /api/skills/unpin``
+    to remove a pin explicitly.
+    """
+
+    name: str = Field(..., min_length=1, max_length=80)
+    session_id: Optional[str] = Field(None, max_length=128)
+
+
+class SkillUnpinRequest(BaseModel):
+    """Remove a pin for a skill from a session."""
+
+    name: str = Field(..., min_length=1, max_length=80)
     session_id: Optional[str] = Field(None, max_length=128)
 
 
@@ -1217,6 +1241,134 @@ def setup_skills_routes(
             user,
         )
         return {"ok": True, "skill": skill.to_dict()}
+
+    def _resolve_visible_skill_or_403(name: str, user: Optional[str]) -> dict:
+        """Return the skill ``name`` if visible to ``user``.
+
+        Mirrors the cross-owner semantics of ``POST /api/skills/invoke``:
+        a skill that exists under another owner yields 403, while a
+        missing skill yields 404. In auth-disabled mode (``user`` is
+        ``None``) every loaded skill is visible, so any miss is a 404.
+        """
+        for maybe_mgr in (skills_manager, project_skills_manager):
+            if maybe_mgr is None:
+                continue
+            try:
+                for skill in maybe_mgr.load(owner=user):
+                    if skill.get("name") == name:
+                        return skill
+            except Exception:
+                logger.warning(
+                    "Failed to load skills while resolving %s", name, exc_info=True
+                )
+        # Cross-owner check: surface a 403 when the skill exists under
+        # another owner so the caller can distinguish access-denied from
+        # genuinely-missing.
+        if user is not None:
+            for maybe_mgr in (skills_manager, project_skills_manager):
+                if maybe_mgr is None:
+                    continue
+                try:
+                    others = maybe_mgr.load_all()
+                except Exception:
+                    logger.warning(
+                        "Failed to load skills (all owners) while resolving %s",
+                        name,
+                        exc_info=True,
+                    )
+                    continue
+                if any(
+                    s.get("name") == name and s.get("owner") != user
+                    for s in others
+                ):
+                    raise HTTPException(403, "Access to skill denied")
+        raise HTTPException(404, "Skill not found")
+
+    @router.post("/pin")
+    async def pin_skill_route(request: Request, body: SkillPinRequest):
+        """Pin a skill to the current session so it stays active across turns.
+
+        Pins are additive: pinning a different skill does NOT replace an
+        existing pin (Task 6 Quality Gate #4). The pin persists to
+        ``data/session_skills.json`` so it survives page refreshes and
+        server restarts (Task 6 Quality Gate #2). Pinning in one session
+        does not affect another (Task 6 Quality Gate #1).
+        """
+        user = _owner(request)
+        if user is None and not _auth_disabled():
+            raise HTTPException(401, "Authentication required")
+        if not body.session_id:
+            raise HTTPException(400, "session_id is required")
+        # Resolve + owner-check before recording the pin so we never pin a
+        # skill the caller cannot actually use.
+        _resolve_visible_skill_or_403(body.name, user)
+        added = pin_skill(body.session_id, body.name)
+        logger.info(
+            "Skill %s pinned for session %s (owner=%s, added=%s)",
+            body.name,
+            body.session_id,
+            user,
+            added,
+        )
+        return {
+            "ok": True,
+            "name": body.name,
+            "session_id": body.session_id,
+            "pinned": True,
+            "added": added,
+            "pins": list_pinned_skills(body.session_id),
+        }
+
+    @router.post("/unpin")
+    async def unpin_skill_route(request: Request, body: SkillUnpinRequest):
+        """Remove a pin for a skill from a session.
+
+        Idempotent: unpinning a skill that was never pinned returns ``ok``
+        with ``removed=False``.
+        """
+        user = _owner(request)
+        if user is None and not _auth_disabled():
+            raise HTTPException(401, "Authentication required")
+        if not body.session_id:
+            raise HTTPException(400, "session_id is required")
+        # The skill need not currently be pinned, but the caller still
+        # must have visibility into it — otherwise unpin becomes a
+        # cross-owner oracle.
+        _resolve_visible_skill_or_403(body.name, user)
+        removed = unpin_skill(body.session_id, body.name)
+        logger.info(
+            "Skill %s unpinned from session %s (owner=%s, removed=%s)",
+            body.name,
+            body.session_id,
+            user,
+            removed,
+        )
+        return {
+            "ok": True,
+            "name": body.name,
+            "session_id": body.session_id,
+            "removed": removed,
+            "pins": list_pinned_skills(body.session_id),
+        }
+
+    @router.get("/pins")
+    async def list_pins_route(request: Request, session_id: Optional[str] = None):
+        """List pinned skills for the current session.
+
+        ``session_id`` is a query parameter; the dispatcher reads the same
+        store on every turn so this endpoint simply exposes the persisted
+        list to the UI.
+        """
+        user = _owner(request)
+        if user is None and not _auth_disabled():
+            raise HTTPException(401, "Authentication required")
+        pins = list_pinned_skills(session_id)
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "pins": pins,
+            "count": len(pins),
+        }
 
     @router.get("/builtin")
     async def list_builtin_skills(request: Request):

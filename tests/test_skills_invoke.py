@@ -12,7 +12,7 @@ from fastapi.datastructures import State
 from services.memory.skill_format import slugify
 from services.memory.skills import SkillsManager
 from routes.skills_routes import setup_skills_routes, SkillInvokeRequest
-from src import session_skill_state
+from src import session_skill_pins, session_skill_state
 
 
 def _write_skill_md(skills_root: Path, *, name: str, owner: str, **fields) -> Path:
@@ -73,13 +73,23 @@ def _request(user: str | None = "alice") -> Request:
 
 
 @pytest.fixture(autouse=True)
-def _clear_session_state():
-    """Keep session-skill state isolated between tests."""
+def _clear_session_state(tmp_path, monkeypatch):
+    """Keep session-skill state isolated between tests.
+
+    Task 6 made the pin store JSON-backed, so we point
+    ``ODYSSEUS_DATA_DIR`` at a per-test ``data/`` directory and reset the
+    process-wide singleton so each test starts from an empty file.
+    """
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ODYSSEUS_DATA_DIR", str(data_dir))
+    session_skill_pins.default_store.cache_clear()
     for sid in ("sess-active", "sess-404", "sess-403", "sess-project", "sess-anon", "sess-auth"):
         session_skill_state.clear_active_skill(sid)
     yield
     for sid in ("sess-active", "sess-404", "sess-403", "sess-project", "sess-anon", "sess-auth"):
         session_skill_state.clear_active_skill(sid)
+    session_skill_pins.default_store.cache_clear()
 
 
 @pytest.mark.asyncio

@@ -35,6 +35,9 @@ BG_JOBS_FILE = os.path.join(DATA_DIR, "bg_jobs.json")
 VAULT_FILE = os.path.join(DATA_DIR, "vault.json")
 TIDY_CALENDAR_STATE_FILE = os.path.join(DATA_DIR, "tidy_calendar_state.json")
 SKILLS_FILE = os.path.join(DATA_DIR, "skills.json")
+# Task 6: persisted session skill pins (keyed by session id). The pin store
+# reads ODYSSEUS_DATA_DIR at construction time via ``src.session_skill_pins``.
+SESSION_SKILLS_FILE = os.path.join(DATA_DIR, "session_skills.json")
 APP_DB = os.path.join(DATA_DIR, "app.db")
 SCHEDULED_EMAILS_DB = os.path.join(DATA_DIR, "scheduled_emails.db")
 EMAIL_CACHE_DB = os.path.join(DATA_DIR, "email_cache.db")
