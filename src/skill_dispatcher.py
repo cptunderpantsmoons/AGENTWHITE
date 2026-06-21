@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import signal
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
@@ -21,6 +22,11 @@ if TYPE_CHECKING:
     from services.memory.skills import SkillsManager
 
 logger = logging.getLogger(__name__)
+
+# Hard ceiling on how long a single trigger regex may run.  This prevents
+# user-supplied patterns with catastrophic backtracking from blocking the
+# dispatcher.
+_TRIGGER_TIMEOUT = float(os.environ.get("SKILL_TRIGGER_REGEX_TIMEOUT", "0.1"))
 
 
 @dataclass(frozen=True)
@@ -218,11 +224,12 @@ class SkillDispatcher:
     def _read_markdown(self, skill: Dict[str, Any]) -> str:
         """Return the full SKILL.md text for a loaded skill.
 
-        Prefers reading from the skill's ``path``; falls back to the source
-        manager's ``read_skill_md`` method when no usable path is available.
+        Prefers reading from the skill's ``path`` only after confirming the
+        resolved path lives inside a known skills directory; falls back to
+        the source manager's ``read_skill_md`` method.
         """
         path = skill.get("path")
-        if path and os.path.isfile(path):
+        if path and self._is_path_in_allowed_root(path):
             try:
                 with open(path, encoding="utf-8") as f:
                     return f.read()
@@ -238,6 +245,37 @@ class SkillDispatcher:
             except Exception:
                 logger.warning("Failed to read skill markdown via manager")
         return ""
+
+    def _allowed_roots(self) -> List[str]:
+        """Return the realpaths of directories from which markdown may be read."""
+        roots: List[str] = []
+        for mgr in (self.global_manager, self.project_manager):
+            if mgr is None:
+                continue
+            root = getattr(mgr, "skills_root", None)
+            if not root:
+                data_dir = getattr(mgr, "data_dir", None)
+                if data_dir:
+                    root = os.path.join(data_dir, "skills")
+            if root and os.path.isdir(root):
+                roots.append(os.path.realpath(root))
+        return roots
+
+    def _is_path_in_allowed_root(self, path: str) -> bool:
+        roots = self._allowed_roots()
+        if not roots:
+            return False
+        try:
+            target = os.path.realpath(path)
+        except Exception:
+            return False
+        for root in roots:
+            try:
+                if os.path.commonpath([root, target]) == root:
+                    return True
+            except ValueError:
+                continue
+        return False
 
     @staticmethod
     def _sort_by_priority(skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -255,17 +293,77 @@ class SkillDispatcher:
 
     @staticmethod
     def _match_triggers(message: str, skill: Dict[str, Any]) -> bool:
+        """Match skill triggers against the message without invoking an LLM.
+
+        Patterns that contain regex metacharacters run under a strict timeout
+        so catastrophic backtracking cannot block the dispatcher.
+        """
+        message_lower = message.lower()
         for trigger in skill.get("triggers") or []:
             if not trigger:
                 continue
             trigger_str = str(trigger)
+
+            # Fast path: plain substrings need no regex engine.
+            if not SkillDispatcher._contains_regex_meta(trigger_str):
+                if trigger_str.lower() in message_lower:
+                    return True
+                continue
+
+            # Regex path: compile once and run with a deadline.
             try:
-                if re.search(trigger_str, message, re.IGNORECASE):
-                    return True
+                compiled = re.compile(trigger_str, re.IGNORECASE)
             except re.error:
-                if trigger_str.lower() in message.lower():
+                if trigger_str.lower() in message_lower:
                     return True
+                continue
+
+            match = SkillDispatcher._safe_regex_search(
+                compiled, message, _TRIGGER_TIMEOUT
+            )
+            if isinstance(match, Exception):
+                if trigger_str.lower() in message_lower:
+                    return True
+                continue
+            if match:
+                return True
         return False
+
+    @staticmethod
+    def _contains_regex_meta(trigger: str) -> bool:
+        """Return True if ``trigger`` looks like a regex rather than a literal."""
+        return bool(re.search(r"[.*?+^$|\\()[\]{}]", trigger))
+
+    @staticmethod
+    def _safe_regex_search(pattern: re.Pattern, text: str, timeout: float):
+        """Run ``pattern.search(text)`` with a hard real-time deadline.
+
+        Uses ``SIGALRM`` so catastrophic-backtracking C code is interrupted.
+        Returns the match object on success, an exception instance on regex
+        failure, or ``None`` when the deadline expires.
+        """
+
+        class _RegexTimeoutError(Exception):
+            """Raised when the regex deadline fires."""
+
+        def _handler(signum, frame) -> None:  # noqa: ARG001
+            raise _RegexTimeoutError()
+
+        if not hasattr(signal, "SIGALRM"):
+            return pattern.search(text)
+
+        old_handler = signal.signal(signal.SIGALRM, _handler)
+        old_timer = signal.setitimer(signal.ITIMER_REAL, timeout)
+        try:
+            return pattern.search(text)
+        except _RegexTimeoutError:
+            logger.warning(
+                "Trigger regex timed out after %.3fs: %r", timeout, pattern.pattern
+            )
+            return None
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, *old_timer)
+            signal.signal(signal.SIGALRM, old_handler)
 
     def _add_relevance_fallback(
         self,

@@ -172,6 +172,21 @@ class TestTriggerMatching:
         assert len(results) == 1
         assert results[0].name == "test"
 
+    def test_trigger_malicious_regex_does_not_hang(self):
+        import time
+
+        # Pattern with nested quantifiers that causes catastrophic backtracking
+        # when there is no final ``b`` to match.
+        mgr = FakeSkillsManager(
+            [_skill("evil", "Evil skill", triggers=[r"(a+)+b"])]
+        )
+        dispatcher = SkillDispatcher(mgr)
+        start = time.perf_counter()
+        results = dispatcher.resolve_active_skills("a" * 3000)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 0.5
+        assert results == []
+
 
 class TestPriorityAndCapping:
     def test_priority_tiebreaks_trigger_matches(self):
@@ -291,6 +306,30 @@ class TestRelevanceFallback:
         assert results[-1].name == "python"
         assert results[-1].reason == "relevance"
 
+    def test_relevance_fallback_ordering_is_unambiguous(self):
+        """Ordering must come from dispatch priority, not accidental name sort."""
+
+        class ScoredManager(FakeSkillsManager):
+            def get_relevant_skills(self, query, skills=None, **kwargs):
+                target = list(skills or self.skills)
+                # Simulate a scorer that returns candidates by score, using a
+                # deliberately non-alphabetical priority order.
+                target.sort(key=lambda s: -s.get("priority", 0))
+                return target[: kwargs.get("max_items", 5)]
+
+        mgr = ScoredManager(
+            [
+                _skill("zeta", "Zeta docs", priority=3),
+                _skill("alpha", "Alpha docs", priority=1),
+                _skill("beta", "Beta docs", priority=2),
+            ]
+        )
+        dispatcher = SkillDispatcher(mgr, max_active=3)
+        results = dispatcher.resolve_active_skills("docs")
+        # If ordering were driven by the secondary name sort, the result would
+        # be alpha, beta, zeta.  The expected order proves priority is used.
+        assert [r.name for r in results] == ["zeta", "beta", "alpha"]
+
     def test_relevance_not_used_when_slash_resolves(self):
         mgr = FakeSkillsManager(
             [
@@ -328,6 +367,19 @@ class TestToolAndModelOverrides:
         assert res.max_tokens == 2048
         assert res.inject_mode == "directive"
 
+    def test_max_tokens_zero_preserved_and_missing_is_none(self):
+        mgr = FakeSkillsManager(
+            [
+                _skill("zero", "Zero token limit", max_tokens=0),
+                _skill("missing", "No token limit"),
+            ]
+        )
+        dispatcher = SkillDispatcher(mgr)
+        zero = dispatcher.resolve_active_skills("/zero")[0]
+        missing = dispatcher.resolve_active_skills("/missing")[0]
+        assert zero.max_tokens == 0
+        assert missing.max_tokens is None
+
 
 class TestGracefulDegradation:
     def test_no_skills_manager_returns_empty(self):
@@ -349,3 +401,48 @@ class TestGracefulDegradation:
 
         dispatcher = SkillDispatcher(BrokenManager())
         assert dispatcher.resolve_active_skills("hello") == []
+
+
+class TestPathValidation:
+    def test_path_traversal_outside_skills_root_is_blocked(self, tmp_path):
+        skills_root = tmp_path / "skills"
+        skills_root.mkdir()
+
+        secret_file = tmp_path / "secret.md"
+        secret_file.write_text("secret content")
+
+        skill = _skill("leaky", "Leaky skill", _markdown="# safe\n")
+        skill["path"] = str(secret_file)
+
+        class RootedManager(FakeSkillsManager):
+            def __init__(self, skills_root, skills):
+                super().__init__(skills)
+                self.skills_root = str(skills_root)
+
+        mgr = RootedManager(skills_root, [skill])
+        dispatcher = SkillDispatcher(mgr)
+        results = dispatcher.resolve_active_skills("/leaky")
+        assert len(results) == 1
+        assert results[0].markdown == "# safe\n"
+        assert "secret content" not in results[0].markdown
+
+    def test_path_inside_skills_root_is_allowed(self, tmp_path):
+        skills_root = tmp_path / "skills"
+        skill_dir = skills_root / "general" / "disky"
+        skill_dir.mkdir(parents=True)
+        md_file = skill_dir / "SKILL.md"
+        md_file.write_text("# from disk\n")
+
+        skill = _skill("disky", "Disky skill", _markdown="# from manager\n")
+        skill["path"] = str(md_file)
+
+        class RootedManager(FakeSkillsManager):
+            def __init__(self, skills_root, skills):
+                super().__init__(skills)
+                self.skills_root = str(skills_root)
+
+        mgr = RootedManager(skills_root, [skill])
+        dispatcher = SkillDispatcher(mgr)
+        results = dispatcher.resolve_active_skills("/disky")
+        assert len(results) == 1
+        assert results[0].markdown == "# from disk\n"
