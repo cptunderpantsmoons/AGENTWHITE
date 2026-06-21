@@ -464,7 +464,7 @@ from src.config import config
 # ========= COMPONENT INITIALIZATION =========
 from src.app_initializer import initialize_managers
 
-components = initialize_managers(BASE_DIR, rag_manager)
+components = initialize_managers(BASE_DIR, rag_manager, auth_manager=auth_manager)
 
 session_manager   = components["session_manager"]
 from src.assistant_log import set_session_manager as _set_asst_sm

@@ -470,6 +470,7 @@ def build_user_content(
                                 upload_id=os.path.basename(path),
                                 title=title,
                                 intro_text=pdf_body_text,
+                                owner=owner,
                             )
                             if doc_id:
                                 extracted_text = (
@@ -487,6 +488,7 @@ def build_user_content(
                                 upload_id=os.path.basename(path),
                                 title=title,
                                 body_text=pdf_body_text,
+                                owner=owner,
                             )
                             if doc_id:
                                 extracted_text = (

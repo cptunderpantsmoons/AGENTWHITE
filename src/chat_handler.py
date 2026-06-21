@@ -40,6 +40,7 @@ class ChatHandler:
         research_handler,
         preset_manager,
         upload_handler,
+        auth_manager=None,
     ):
         self.session_manager = session_manager
         self.memory_manager = memory_manager
@@ -47,6 +48,7 @@ class ChatHandler:
         self.research_handler = research_handler
         self.preset_manager = preset_manager
         self.upload_handler = upload_handler
+        self.auth_manager = auth_manager
 
     # ------------------------------------------------------------------
     # Preset helpers
@@ -98,6 +100,7 @@ class ChatHandler:
         att_ids: List[str],
         sess,
         auto_opened_docs: Optional[List[Dict[str, Any]]] = None,
+        request_user: Optional[str] = None,
     ) -> tuple:
         """
         Common preprocessing for both chat endpoints.
@@ -150,13 +153,17 @@ class ChatHandler:
             model_supports_vision, sess.model or "", getattr(sess, "endpoint_url", "") or ""
         )
 
-        # Resolve uploads once with the session owner. Attachment IDs are
-        # bearer-like references; never trust them without an owner check.
+        # Resolve uploads once with the authenticated request user. The
+        # session's stored owner is fallback only; the current caller is the
+        # authority for upload ownership checks. Pass auth_manager so admin
+        # users receive the owner-bypass they have everywhere else.
         files_by_id: Dict[str, Dict] = {}
-        owner = getattr(sess, "owner", None)
+        owner = request_user or getattr(sess, "owner", None)
         if att_ids:
             for att_id in att_ids:
-                fi = self.upload_handler.resolve_upload(att_id, owner=owner)
+                fi = self.upload_handler.resolve_upload(
+                    att_id, owner=owner, auth_manager=self.auth_manager
+                )
                 if fi:
                     files_by_id[att_id] = fi
 

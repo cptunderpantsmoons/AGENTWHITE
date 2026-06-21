@@ -30,7 +30,7 @@ def create_directories():
     for directory in (DATA_DIR, PERSONAL_DIR, RUNBOOK_DIR, UPLOAD_DIR):
         os.makedirs(directory, exist_ok=True)
         
-def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
+def initialize_managers(base_dir: str, rag_manager=None, auth_manager=None) -> Dict[str, Any]:
     """
     Initialize all manager and handler instances.
 
@@ -90,6 +90,7 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
         research_handler=research_handler,
         preset_manager=preset_manager,
         upload_handler=upload_handler,
+        auth_manager=auth_manager,
     )
     
     # Initialize model discovery

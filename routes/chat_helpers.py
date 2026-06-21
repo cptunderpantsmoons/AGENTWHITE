@@ -277,11 +277,13 @@ def extract_preset(chat_handler, preset_id) -> PresetInfo:
 async def preprocess(
     chat_handler, message, att_ids, sess,
     auto_opened_docs: Optional[list] = None,
+    request_user: Optional[str] = None,
 ) -> PreprocessedMessage:
     """Run chat_handler.preprocess_message and wrap the result."""
     enhanced, user_content, text_ctx, yt_transcripts, att_meta = (
         await chat_handler.preprocess_message(
-            message, att_ids, sess, auto_opened_docs=auto_opened_docs
+            message, att_ids, sess, auto_opened_docs=auto_opened_docs,
+            request_user=request_user,
         )
     )
     return PreprocessedMessage(
@@ -456,6 +458,10 @@ async def build_chat_context(
     This is the shared logic between /chat and /chat_stream — preset extraction,
     message preprocessing, memory/RAG/web injection, compaction, normalization.
     """
+    # Resolve the authenticated user early; preprocessing needs the real
+    # owner for upload resolution, not just the session's stored owner.
+    user = get_current_user(request)
+
     # Preset
     preset = extract_preset(chat_handler, preset_id)
 
@@ -467,6 +473,7 @@ async def build_chat_context(
     preprocessed = await preprocess(
         chat_handler, message, att_ids or [], sess,
         auto_opened_docs=auto_opened_docs,
+        request_user=user,
     )
 
     # Add user message to history
@@ -477,7 +484,6 @@ async def build_chat_context(
         fire_message_event(request, webhook_manager, session_id, sess, message, compare_mode)
 
     # Resolve user prefs
-    user = get_current_user(request)
     uprefs = load_prefs_for_user(user)
 
     # Memory enabled?
