@@ -313,6 +313,15 @@ class SkillsManager:
         platforms: Optional[List[str]] = None,
         requires_toolsets: Optional[List[str]] = None,
         fallback_for_toolsets: Optional[List[str]] = None,
+        triggers: Optional[List[str]] = None,
+        examples: Optional[List[str]] = None,
+        tools_required: Optional[List[str]] = None,
+        tools_disabled: Optional[List[str]] = None,
+        priority: int = 0,
+        pinned: bool = False,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        inject_mode: str = "procedure",
         status: str = "draft",
         version: str = "1.0.0",
     ) -> Dict:
@@ -366,6 +375,15 @@ class SkillsManager:
             platforms=list(platforms or []),
             requires_toolsets=list(requires_toolsets or []),
             fallback_for_toolsets=list(fallback_for_toolsets or []),
+            triggers=list(triggers or []),
+            examples=list(examples or []),
+            tools_required=list(tools_required or []),
+            tools_disabled=list(tools_disabled or []),
+            priority=int(priority),
+            pinned=bool(pinned),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            inject_mode=inject_mode if inject_mode in ("procedure", "directive") else "procedure",
             status=status or "draft",
             confidence=float(confidence),
             source=source,
@@ -456,13 +474,15 @@ class SkillsManager:
             scalar_keys = (
                 "description", "version", "category", "status", "confidence",
                 "source", "teacher_model", "when_to_use",
-                "body_extra",
+                "body_extra", "priority", "pinned", "temperature",
+                "max_tokens", "inject_mode",
             )
             for k in scalar_keys:
                 if k in updates:
                     setattr(sk, k, updates[k])
             list_keys = ("tags", "procedure", "pitfalls", "verification",
-                         "platforms", "requires_toolsets", "fallback_for_toolsets")
+                         "platforms", "requires_toolsets", "fallback_for_toolsets",
+                         "triggers", "examples", "tools_required", "tools_disabled")
             for k in list_keys:
                 if k in updates:
                     setattr(sk, k, list(updates[k] or []))

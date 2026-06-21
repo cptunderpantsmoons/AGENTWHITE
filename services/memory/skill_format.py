@@ -50,7 +50,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -201,6 +201,35 @@ def _as_float(v: Any, default: float = 0.8) -> float:
         return default
 
 
+def _as_int(v: Any, default: int = 0) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_bool(v: Any, default: bool = False) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in ("true", "yes", "1", "on")
+    if v in (1,):
+        return True
+    if v in (0,):
+        return False
+    return default
+
+
+# Canonical frontmatter key order for skills created from scratch.
+_DEFAULT_FM_ORDER = (
+    "name", "description", "version", "category",
+    "tags", "platforms", "requires_toolsets", "fallback_for_toolsets",
+    "triggers", "examples", "tools_required", "tools_disabled",
+    "priority", "pinned", "inject_mode", "temperature", "max_tokens",
+    "status", "confidence", "source", "teacher_model", "owner", "created",
+)
+
+
 def emit_frontmatter(fm: Dict[str, Any]) -> str:
     lines = []
     for k, v in fm.items():
@@ -332,6 +361,17 @@ class Skill:
     teacher_model: Optional[str] = None
     owner: Optional[str] = None
     created: str = ""                                  # ISO8601
+    # Active-skill metadata
+    triggers: List[str] = field(default_factory=list)
+    examples: List[str] = field(default_factory=list)
+    tools_required: List[str] = field(default_factory=list)
+    tools_disabled: List[str] = field(default_factory=list)
+    priority: int = 0
+    pinned: bool = False
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    inject_mode: str = "procedure"                    # procedure | directive
+    # Body sections
     when_to_use: str = ""
     procedure: List[str] = field(default_factory=list)
     pitfalls: List[str] = field(default_factory=list)
@@ -342,12 +382,15 @@ class Skill:
     last_used: Optional[int] = None
     # File path on disk (set when read)
     path: Optional[str] = None
+    # Order of keys seen in the source file; used to preserve round-trip order.
+    _fm_order: tuple[str, ...] = field(default=(), repr=False)
 
     # ----------------------------------------------------------------------
     # Serialization
     # ----------------------------------------------------------------------
 
-    def to_frontmatter(self) -> Dict[str, Any]:
+    def _frontmatter_values(self) -> Dict[str, Any]:
+        """Return the full frontmatter mapping before order/empty filtering."""
         fm: Dict[str, Any] = {
             "name": self.name,
             "description": self.description,
@@ -358,12 +401,45 @@ class Skill:
         if self.platforms:             fm["platforms"] = list(self.platforms)
         if self.requires_toolsets:     fm["requires_toolsets"] = list(self.requires_toolsets)
         if self.fallback_for_toolsets: fm["fallback_for_toolsets"] = list(self.fallback_for_toolsets)
+        if self.triggers:              fm["triggers"] = list(self.triggers)
+        if self.examples:              fm["examples"] = list(self.examples)
+        if self.tools_required:        fm["tools_required"] = list(self.tools_required)
+        if self.tools_disabled:        fm["tools_disabled"] = list(self.tools_disabled)
+        if self.priority:              fm["priority"] = int(self.priority)
+        if self.pinned is True:        fm["pinned"] = True
+        if self.inject_mode != "procedure":
+            fm["inject_mode"] = self.inject_mode
+        if self.temperature is not None:
+            fm["temperature"] = float(self.temperature)
+        if self.max_tokens is not None:
+            fm["max_tokens"] = int(self.max_tokens)
         fm["status"] = self.status
         fm["confidence"] = round(float(self.confidence), 3)
         fm["source"] = self.source
         if self.teacher_model: fm["teacher_model"] = self.teacher_model
         if self.owner:         fm["owner"] = self.owner
         fm["created"] = self.created or _now_iso()
+        return fm
+
+    def to_frontmatter(self) -> Dict[str, Any]:
+        all_values = self._frontmatter_values()
+        order = list(self._fm_order) if self._fm_order else list(_DEFAULT_FM_ORDER)
+        fm: Dict[str, Any] = {}
+        for key in order:
+            if key not in all_values:
+                continue
+            v = all_values[key]
+            if v is None or v == [] or v == "":
+                continue
+            fm[key] = v
+        # Any values added after parsing (or fields not in the canonical order)
+        # are appended at the end so nothing is silently dropped.
+        for key, v in all_values.items():
+            if key in fm:
+                continue
+            if v is None or v == [] or v == "":
+                continue
+            fm[key] = v
         return fm
 
     def to_dict(self) -> Dict[str, Any]:
@@ -377,6 +453,15 @@ class Skill:
             "platforms": list(self.platforms),
             "requires_toolsets": list(self.requires_toolsets),
             "fallback_for_toolsets": list(self.fallback_for_toolsets),
+            "triggers": list(self.triggers),
+            "examples": list(self.examples),
+            "tools_required": list(self.tools_required),
+            "tools_disabled": list(self.tools_disabled),
+            "priority": int(self.priority),
+            "pinned": bool(self.pinned),
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "inject_mode": self.inject_mode,
             "status": self.status,
             "confidence": round(float(self.confidence), 3),
             "source": self.source,
@@ -405,6 +490,33 @@ class Skill:
         sections = parse_body(body)
         raw_name = fm.get("name")
         name = slugify(raw_name if raw_name not in (None, "") else fm.get("description", ""), fallback="skill")
+
+        inject_mode = str(fm.get("inject_mode", "procedure") or "procedure")
+        if inject_mode not in ("procedure", "directive"):
+            logger.warning(
+                "Invalid inject_mode %r in skill %s; falling back to 'procedure'.",
+                inject_mode, name,
+            )
+            inject_mode = "procedure"
+
+        temperature_raw = fm.get("temperature")
+        temperature: Optional[float]
+        if temperature_raw is None or temperature_raw == "":
+            temperature = None
+        else:
+            temperature = _as_float(temperature_raw, default=float("nan"))
+            if temperature != temperature:  # NaN guard
+                temperature = None
+
+        max_tokens_raw = fm.get("max_tokens")
+        max_tokens: Optional[int]
+        if max_tokens_raw is None or max_tokens_raw == "":
+            max_tokens = None
+        else:
+            max_tokens = _as_int(max_tokens_raw, default=0)
+            if max_tokens == 0:
+                max_tokens = None
+
         return cls(
             name=name,
             description=str(fm.get("description", "") or ""),
@@ -420,12 +532,22 @@ class Skill:
             teacher_model=str(fm.get("teacher_model")) if fm.get("teacher_model") else None,
             owner=str(fm.get("owner")) if fm.get("owner") else None,
             created=str(fm.get("created") or _now_iso()),
+            triggers=_as_list(fm.get("triggers")),
+            examples=_as_list(fm.get("examples")),
+            tools_required=_as_list(fm.get("tools_required")),
+            tools_disabled=_as_list(fm.get("tools_disabled")),
+            priority=_as_int(fm.get("priority", 0), default=0),
+            pinned=_as_bool(fm.get("pinned"), default=False),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            inject_mode=inject_mode,
             when_to_use=sections["when_to_use"],
             procedure=list(sections["procedure"]),
             pitfalls=list(sections["pitfalls"]),
             verification=list(sections["verification"]),
             body_extra=sections["body_extra"],
             path=path,
+            _fm_order=tuple(fm.keys()),
         )
 
     def to_markdown(self) -> str:
@@ -441,4 +563,4 @@ class Skill:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
