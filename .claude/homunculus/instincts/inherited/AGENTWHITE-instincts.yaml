@@ -1,0 +1,708 @@
+# Instincts generated from https://github.com/cptunderpantsmoons/AGENTWHITE
+# Generated: 2026-06-21T21:35:45.690Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: AGENTWHITE-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix, feat, ci, docs, refactor
+
+## Evidence
+
+- 100 commits analyzed
+- Detected conventional commit pattern
+- Examples: fix(gallery): add auth check to /api/image/sharpen endpoint (#2761), ci: skip pytest smoke on documentation-only changes (#2768)
+
+---
+id: AGENTWHITE-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Commit Length
+
+## Action
+
+Write moderate-length commit messages (~67 characters)
+
+## Evidence
+
+- Average commit message length: 67 chars
+- Based on 100 commits
+
+---
+id: AGENTWHITE-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: AGENTWHITE-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: AGENTWHITE-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: AGENTWHITE-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: AGENTWHITE-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: AGENTWHITE-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~7x per month
+- Files: **/*.test.*, **/api/**
+
+---
+id: AGENTWHITE-workflow-refactoring
+trigger: "when refactoring code"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Refactoring
+
+## Action
+
+Follow the refactoring workflow:
+1. Ensure tests pass before refactor
+2. Refactor code structure
+3. Verify tests still pass
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: src/**/*
+
+---
+id: AGENTWHITE-workflow-api-endpoint-owner-scope-hardening
+trigger: "when doing api endpoint owner scope hardening"
+confidence: 0.8
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Api Endpoint Owner Scope Hardening
+
+## Action
+
+Follow the api-endpoint-owner-scope-hardening workflow:
+1. Update one or more routes/*_routes.py files to add or tighten owner checks.
+2. Update corresponding src/* files (e.g., src/task_scheduler.py, src/chat_handler.py) to propagate or enforce owner scoping.
+3. Add or update tests in tests/ to verify owner scoping and regression coverage.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~6x per month
+- Files: routes/*_routes.py, src/*, tests/test_*owner_scope.py
+
+---
+id: AGENTWHITE-workflow-bugfix-with-regression-test
+trigger: "when doing bugfix with regression test"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Bugfix With Regression Test
+
+## Action
+
+Follow the bugfix-with-regression-test workflow:
+1. Fix the bug in the relevant src/ or routes/ file.
+2. Add or update a test in tests/ to cover the specific bug and its edge cases.
+3. Document the fix in the commit message, often referencing the test file.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~8x per month
+- Files: src/*.py, routes/*.py, tests/test_*.py
+
+---
+id: AGENTWHITE-workflow-security-hardening-with-integration-tests
+trigger: "when doing security hardening with integration tests"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Security Hardening With Integration Tests
+
+## Action
+
+Follow the security-hardening-with-integration-tests workflow:
+1. Update application or middleware code to address the security issue.
+2. Add or update integration tests in tests/ to cover the security scenario.
+3. Document the security context and test coverage in the commit message.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: scripts/*.py, core/*.py, src/*.py
+
+---
+id: AGENTWHITE-workflow-feature-addition-or-enhancement-with-tests
+trigger: "when doing feature addition or enhancement with tests"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Feature Addition Or Enhancement With Tests
+
+## Action
+
+Follow the feature-addition-or-enhancement-with-tests workflow:
+1. Implement the feature in src/ and/or routes/ files.
+2. Update or create relevant static/js/* files if UI is involved.
+3. Add or update tests in tests/ to cover new or changed behavior.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: src/*.py, routes/*.py, static/js/*.js
+
+---
+id: AGENTWHITE-workflow-frontend-bugfix-or-enhancement
+trigger: "when doing frontend bugfix or enhancement"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Frontend Bugfix Or Enhancement
+
+## Action
+
+Follow the frontend-bugfix-or-enhancement workflow:
+1. Update static/js/*.js and/or static/style.css to fix or enhance frontend behavior.
+2. Optionally update static/*.html or docs/index.html for markup changes.
+3. Document the UI/UX impact in the commit message.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: static/js/*.js, static/style.css, static/*.html
+
+---
+id: AGENTWHITE-workflow-ci-or-devops-workflow-update
+trigger: "when doing ci or devops workflow update"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/cptunderpantsmoons/AGENTWHITE
+---
+
+# AGENTWHITE Workflow Ci Or Devops Workflow Update
+
+## Action
+
+Follow the ci-or-devops-workflow-update workflow:
+1. Update .github/workflows/*.yml or related CI/CD config files.
+2. Implement logic to skip or adjust test runs based on file patterns.
+3. Document the workflow change in the commit message.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: .github/workflows/*.yml
+
+---
+id: agentwhite-instinct-file-naming
+trigger: "When creating or renaming a source code file in Python."
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct File Naming
+
+## Action
+
+Use snake_case for file names.
+
+## Evidence
+
+- Pattern in file naming conventions
+- src/agent_tools, routes/gallery_routes.py
+
+---
+id: agentwhite-instinct-function-naming
+trigger: "When defining a function in Python."
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Function Naming
+
+## Action
+
+Use camelCase for function names.
+
+## Evidence
+
+- Naming conventions in codeStyle
+- Pattern in src/ and routes/ files
+
+---
+id: agentwhite-instinct-class-naming
+trigger: "When defining a class in Python."
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names.
+
+## Evidence
+
+- Naming conventions in codeStyle
+- Pattern in src/ and routes/ files
+
+---
+id: agentwhite-instinct-constant-naming
+trigger: "When defining a constant in Python."
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constants.
+
+## Evidence
+
+- Naming conventions in codeStyle
+
+---
+id: agentwhite-instinct-import-style
+trigger: "When importing modules in Python."
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Import Style
+
+## Action
+
+Use relative imports.
+
+## Evidence
+
+- importStyle: relative in codeStyle
+- Pattern in src/agent_tools and routes/
+
+---
+id: agentwhite-instinct-export-style
+trigger: "When exporting functions or classes in Python."
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Export Style
+
+## Action
+
+Use named exports.
+
+## Evidence
+
+- exportStyle: named in codeStyle
+
+---
+id: agentwhite-instinct-test-file-pattern
+trigger: "When creating a test file."
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Test File Pattern
+
+## Action
+
+Name the file as test_<feature>.py for Python tests.
+
+## Evidence
+
+- Pattern in tests/test_*.py
+- Seen in tests/test_owner_scope.py, tests/test_gate.py
+
+---
+id: agentwhite-instinct-test-type-unit
+trigger: "When writing tests."
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Test Type Unit
+
+## Action
+
+Write unit tests as the primary test type.
+
+## Evidence
+
+- testTypes: unit
+- Pattern in tests/test_*.py
+
+---
+id: agentwhite-instinct-test-add-for-bugfix
+trigger: "When fixing a bug."
+confidence: 0.95
+domain: testing
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Test Add For Bugfix
+
+## Action
+
+Add or update a regression test covering the bug and its edge cases.
+
+## Evidence
+
+- bugfix-with-regression-test workflow
+- fix(gallery): add auth check to /api/image/sharpen endpoint (#2761)
+- tests/test_*.py
+
+---
+id: agentwhite-instinct-test-add-for-feature
+trigger: "When adding or enhancing a feature."
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Test Add For Feature
+
+## Action
+
+Add or update tests to cover new or changed behavior.
+
+## Evidence
+
+- feature-addition-or-enhancement-with-tests workflow
+- feat(tasks): assign folder='Tasks' at creation + backfill migration (#2834)
+- tests/test_*.py
+
+---
+id: agentwhite-instinct-commit-format-conventional
+trigger: "When writing a commit message."
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Commit Format Conventional
+
+## Action
+
+Use conventional commit prefixes (fix, feat, ci, docs, refactor) and scope in parentheses if applicable.
+
+## Evidence
+
+- Pattern in commit messages
+- fix(gallery): add auth check to /api/image/sharpen endpoint (#2761)
+- docs: note dev branch status in README (#3196)
+
+---
+id: agentwhite-instinct-commit-length
+trigger: "When composing a commit message."
+confidence: 0.8
+domain: git
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Commit Length
+
+## Action
+
+Keep the commit message concise, aiming for around 67 characters on average.
+
+## Evidence
+
+- averageLength: 67 in commit patterns
+
+---
+id: agentwhite-instinct-api-owner-scope-hardening
+trigger: "When updating API endpoints that return or modify user data."
+confidence: 0.97
+domain: workflow
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Api Owner Scope Hardening
+
+## Action
+
+Add or tighten owner checks in routes/*_routes.py and propagate/enforce owner scoping in src/*; add or update tests to verify owner scoping.
+
+## Evidence
+
+- api-endpoint-owner-scope-hardening workflow
+- Pattern in routes/*_routes.py, src/*, tests/test_*owner_scope.py
+
+---
+id: agentwhite-instinct-bugfix-with-test
+trigger: "When a bug is discovered in application logic."
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Bugfix With Test
+
+## Action
+
+Fix the bug in src/ or routes/ and add or update a test in tests/ to cover the bug and its edge cases.
+
+## Evidence
+
+- bugfix-with-regression-test workflow
+- fix(document): add 404 guard to version list/get endpoints (#2762)
+- tests/test_*.py
+
+---
+id: agentwhite-instinct-security-hardening
+trigger: "When a security vulnerability or hardening opportunity is identified."
+confidence: 0.93
+domain: workflow
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Security Hardening
+
+## Action
+
+Update application or middleware code to address the security issue and add/update integration tests in tests/ to cover the scenario.
+
+## Evidence
+
+- security-hardening-with-integration-tests workflow
+- tests/test_*security*.py
+- tests/test_cors_*.py
+
+---
+id: agentwhite-instinct-feature-addition-with-tests
+trigger: "When adding a new feature or enhancing an existing one."
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Feature Addition With Tests
+
+## Action
+
+Implement the feature in src/ and/or routes/, update/create relevant static/js/* if UI is involved, and add/update tests in tests/.
+
+## Evidence
+
+- feature-addition-or-enhancement-with-tests workflow
+- src/*.py
+- routes/*.py
+- static/js/*.js
+- tests/test_*.py
+
+---
+id: agentwhite-instinct-frontend-fix
+trigger: "When a UI bug or UX improvement is needed."
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Frontend Fix
+
+## Action
+
+Update static/js/*.js and/or static/style.css to fix or enhance frontend behavior; optionally update static/*.html or docs/index.html for markup changes.
+
+## Evidence
+
+- frontend-bugfix-or-enhancement workflow
+- static/js/*.js
+- static/style.css
+- static/*.html
+- docs/index.html
+
+---
+id: agentwhite-instinct-ci-workflow-update
+trigger: "When CI/CD needs to be optimized or corrected for certain file patterns (e.g., docs-only changes)."
+confidence: 0.88
+domain: workflow
+source: repo-analysis
+source_repo: cptunderpantsmoons/AGENTWHITE
+---
+
+# Agentwhite Instinct Ci Workflow Update
+
+## Action
+
+Update .github/workflows/*.yml or related CI/CD config files and implement logic to skip or adjust test runs based on file patterns.
+
+## Evidence
+
+- ci-or-devops-workflow-update workflow
+- ci: skip pytest smoke on documentation-only changes (#2768)
+- .github/workflows/*.yml
+
