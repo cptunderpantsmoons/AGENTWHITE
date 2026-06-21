@@ -28,39 +28,59 @@ _SQLA_MODS = {
     "sqlalchemy.types": types.ModuleType("sqlalchemy.types"),
 }
 for _mod_name, _mod in _SQLA_MODS.items():
-    sys.modules[_mod_name] = _mod
-    if "." in _mod_name:
-        _parent, _, _child = _mod_name.rpartition(".")
-        setattr(sys.modules[_parent], _child, _mod)
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = _mod
+        if "." in _mod_name:
+            _parent, _, _child = _mod_name.rpartition(".")
+            # Parent is guaranteed to exist (either pre-imported or just
+            # installed above) because we iterate in dict order with the
+            # parent declared before the child.
+            if _parent in sys.modules:
+                setattr(sys.modules[_parent], _child, _mod)
 
 for _mod_name in ("core.database", "core.models", "src.database"):
-    _m = types.ModuleType(_mod_name)
-    _m.SessionLocal = MagicMock()
-    _m.ModelEndpoint = MagicMock()
-    _m.Base = type("Base", (), {})
-    sys.modules[_mod_name] = _m
+    if _mod_name not in sys.modules:
+        _m = types.ModuleType(_mod_name)
+        _m.SessionLocal = MagicMock()
+        _m.ModelEndpoint = MagicMock()
+        _m.Base = type("Base", (), {})
+        sys.modules[_mod_name] = _m
 
-_agent_tools_stub = MagicMock()
-_agent_tools_stub.MAX_AGENT_ROUNDS = 5
-_agent_tools_stub.TOOL_TAGS = set()
-_agent_tools_stub.FUNCTION_TOOL_SCHEMAS = []
-sys.modules["src.agent_tools"] = _agent_tools_stub
+if "src.agent_tools" not in sys.modules:
+    _agent_tools_stub = MagicMock()
+    _agent_tools_stub.MAX_AGENT_ROUNDS = 5
+    _agent_tools_stub.TOOL_TAGS = set()
+    # Provide a minimal schema list so that, when this file's stub is the
+    # one installed (e.g. when it is collected first), downstream files
+    # that exercise the schema-filtering path (test_agent_loop_tool_gating)
+    # still see usable tool names. Empty schemas here would silently break
+    # those tests via sys.modules cross-contamination.
+    _agent_tools_stub.FUNCTION_TOOL_SCHEMAS = [
+        {"function": {"name": "ask_user"}},
+        {"function": {"name": "bash"}},
+        {"function": {"name": "web_search"}},
+    ]
+    sys.modules["src.agent_tools"] = _agent_tools_stub
 
-_tool_index_stub = types.ModuleType("src.tool_index")
-_tool_index_stub.ALWAYS_AVAILABLE = frozenset({"manage_memory", "ask_user", "update_plan"})
-sys.modules["src.tool_index"] = _tool_index_stub
+if "src.tool_index" not in sys.modules:
+    _tool_index_stub = types.ModuleType("src.tool_index")
+    _tool_index_stub.ALWAYS_AVAILABLE = frozenset({"manage_memory", "ask_user", "update_plan"})
+    sys.modules["src.tool_index"] = _tool_index_stub
 
-_user_time_stub = types.ModuleType("src.user_time")
-_user_time_stub.current_datetime_context_message = lambda: None
-sys.modules["src.user_time"] = _user_time_stub
+if "src.user_time" not in sys.modules:
+    _user_time_stub = types.ModuleType("src.user_time")
+    _user_time_stub.current_datetime_context_message = lambda: None
+    sys.modules["src.user_time"] = _user_time_stub
 
-_skills_stub = types.ModuleType("services.memory.skills")
-_skills_stub.SkillsManager = MagicMock
-sys.modules["services.memory.skills"] = _skills_stub
+if "services.memory.skills" not in sys.modules:
+    _skills_stub = types.ModuleType("services.memory.skills")
+    _skills_stub.SkillsManager = MagicMock
+    sys.modules["services.memory.skills"] = _skills_stub
 
-_integrations_stub = types.ModuleType("src.integrations")
-_integrations_stub.get_integrations_prompt = lambda: ""
-sys.modules["src.integrations"] = _integrations_stub
+if "src.integrations" not in sys.modules:
+    _integrations_stub = types.ModuleType("src.integrations")
+    _integrations_stub.get_integrations_prompt = lambda: ""
+    sys.modules["src.integrations"] = _integrations_stub
 
 # Use a temp directory for the default data dir so tests never touch
 # the real data directory.
