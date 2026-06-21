@@ -16973,6 +16973,150 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   background: var(--bg);
   color: var(--fg);
 }
+/* Structured active-skill form (Spec 01 fields). Lives above the raw-markdown
+   textarea in the expanded card so users can edit triggers / tool gates /
+   priority / pinned / temperature / max_tokens / inject_mode without
+   hand-writing YAML. Reuses the existing --bg / --border / --fg variables so
+   it inherits the dark/light theme automatically. */
+.skill-active-form {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+  font-size: 11.5px;
+}
+.skill-active-title {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+}
+.skill-active-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.skill-active-row-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.skill-active-row-grid .skill-active-row {
+  gap: 3px;
+}
+.skill-active-label {
+  font-size: 10.5px;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+}
+.skill-active-input {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.skill-active-input-el {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11.5px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+}
+textarea.skill-active-input-el {
+  resize: vertical;
+  font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.skill-active-input-el:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 70%, var(--border));
+}
+.skill-active-hint {
+  font-size: 10px;
+  opacity: 0.55;
+}
+.skill-active-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.skill-active-checkbox input { margin: 0; }
+/* Live tool-gate preview. Updates on every keystroke in tools_required /
+   tools_disabled. The preview is informational only — the server enforces
+   the actual gate at dispatch time. */
+.skill-active-preview {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg) 92%, var(--fg));
+  font-size: 10.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skill-active-preview-empty {
+  font-style: italic;
+  opacity: 0.55;
+  border-style: dashed;
+}
+.skill-active-preview-invalid {
+  border-color: color-mix(in srgb, var(--color-warning, #f0ad4e) 60%, var(--border));
+}
+.skill-active-preview-line {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  word-break: break-word;
+}
+.skill-active-preview-line code,
+.skill-active-preview-warn code {
+  font-size: 10.5px;
+  word-break: break-word;
+}
+.skill-active-preview-k {
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.skill-active-preview-warn {
+  color: var(--color-warning, #f0ad4e);
+  margin-top: 2px;
+}
+/* Pin pill in the card header. Clicking it calls POST /api/skills/pin or
+   /api/skills/unpin (server is the single source of truth for pin state). */
+.skill-pin-pill {
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+  opacity: 0.7;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+.skill-pin-pill:hover {
+  opacity: 1;
+}
+.skill-pin-pill-on {
+  background: color-mix(in srgb, var(--accent, var(--red)) 30%, transparent);
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 60%, transparent);
+  color: var(--accent, var(--red));
+  opacity: 1;
+}
 .doclib-empty {
   text-align: center;
   color: color-mix(in srgb, var(--fg) 35%, transparent);

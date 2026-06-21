@@ -53,6 +53,19 @@ class SkillAddRequest(BaseModel):
     teacher_model: Optional[str] = None
     session_id: Optional[str] = None
 
+    # Active-skill schema extensions (Spec 01). The SkillsManager.add_skill
+    # call already accepts these; exposing them here lets the Skills editor
+    # UI persist them through the same /api/skills/add route.
+    triggers: List[str] = Field(default_factory=list)
+    examples: List[str] = Field(default_factory=list)
+    tools_required: List[str] = Field(default_factory=list)
+    tools_disabled: List[str] = Field(default_factory=list)
+    priority: int = 0
+    pinned: bool = False
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    inject_mode: str = "procedure"
+
     # Old schema (back-compat)
     title: Optional[str] = Field(None, max_length=200)
     problem: Optional[str] = Field(None, max_length=2000)
@@ -105,6 +118,17 @@ class SkillUpdateRequest(BaseModel):
     version: Optional[str] = None
     confidence: Optional[float] = None
     body_extra: Optional[str] = None
+    # Active-skill schema extensions (Spec 01). Mirror SkillAddRequest so the
+    # editor can PUT updates to these fields through /api/skills/{skill_id}.
+    triggers: Optional[List[str]] = None
+    examples: Optional[List[str]] = None
+    tools_required: Optional[List[str]] = None
+    tools_disabled: Optional[List[str]] = None
+    priority: Optional[int] = None
+    pinned: Optional[bool] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    inject_mode: Optional[str] = None
     # Old shape
     title: Optional[str] = None
     problem: Optional[str] = None
@@ -705,6 +729,15 @@ def _apply_skill_md(skills_manager, name: str, md: str, owner) -> bool:
             "teacher_model": sk.teacher_model, "owner": sk.owner or owner,
             "when_to_use": sk.when_to_use, "procedure": sk.procedure,
             "pitfalls": sk.pitfalls, "verification": sk.verification, "body_extra": sk.body_extra,
+            # Active-skill schema extensions (Spec 01). Round-trip the parsed
+            # frontmatter through update_skill so the audit's self-edit / teacher
+            # rewrite preserves triggers, tool gates, priority, pinned-default,
+            # temperature/max_tokens, inject_mode, and safe.
+            "triggers": sk.triggers, "examples": sk.examples,
+            "tools_required": sk.tools_required, "tools_disabled": sk.tools_disabled,
+            "priority": sk.priority, "pinned": sk.pinned,
+            "temperature": sk.temperature, "max_tokens": sk.max_tokens,
+            "inject_mode": sk.inject_mode, "safe": sk.safe,
         }, owner=owner))
     except Exception as e:
         logger.warning(f"Audit: could not save edited skill {name}: {e}")
@@ -1377,6 +1410,29 @@ def setup_skills_routes(
             "count": len(pins),
         }
 
+    @router.get("/tool-registry")
+    async def list_tool_registry(request: Request):
+        """Return the set of tool names the agent knows about.
+
+        The Skills editor uses this to validate ``tools_required`` and
+        ``tools_disabled`` entries before saving — tool gating narrows, never
+        elevates, so unknown names are rejected client-side rather than
+        silently dropped by the dispatcher. Sourced from
+        ``src.tool_policy.known_tool_names`` (which already unions
+        ``TOOL_SECTIONS`` + the function-tool schemas + plan-mode sets) so
+        the editor's allowlist matches what the runtime actually enforces.
+        """
+        user = _owner(request)
+        if user is None and not _auth_disabled():
+            raise HTTPException(401, "Authentication required")
+        try:
+            from src.tool_policy import known_tool_names
+            names = sorted(known_tool_names())
+        except Exception as e:
+            logger.warning("tool-registry resolve failed: %s", e, exc_info=True)
+            raise HTTPException(500, "Could not load tool registry") from e
+        return {"ok": True, "tools": names, "count": len(names)}
+
     @router.get("/builtin")
     async def list_builtin_skills(request: Request):
         """Read-only list of the agent's built-in tool capabilities (research,
@@ -1530,6 +1586,18 @@ def setup_skills_routes(
             teacher_model=body.teacher_model,
             session_id=body.session_id,
             owner=user,
+            # Active-skill schema extensions (Spec 01). Forwarded so the
+            # Skills editor UI can persist triggers, tool gates, priority,
+            # pins-default, temperature/max_tokens, and inject_mode.
+            triggers=body.triggers,
+            examples=body.examples,
+            tools_required=body.tools_required,
+            tools_disabled=body.tools_disabled,
+            priority=body.priority,
+            pinned=body.pinned,
+            temperature=body.temperature,
+            max_tokens=body.max_tokens,
+            inject_mode=body.inject_mode,
             # Old shape (manager translates)
             title=body.title or "",
             problem=body.problem or "",
@@ -1831,6 +1899,20 @@ def setup_skills_routes(
             "pitfalls": sk.pitfalls,
             "verification": sk.verification,
             "body_extra": sk.body_extra,
+            # Active-skill schema extensions (Spec 01) — round-trip the
+            # frontmatter through the markdown editor so user edits to
+            # triggers, tool gates, priority, pinned-default, temperature,
+            # max_tokens, inject_mode, and safe are persisted.
+            "triggers": sk.triggers,
+            "examples": sk.examples,
+            "tools_required": sk.tools_required,
+            "tools_disabled": sk.tools_disabled,
+            "priority": sk.priority,
+            "pinned": sk.pinned,
+            "temperature": sk.temperature,
+            "max_tokens": sk.max_tokens,
+            "inject_mode": sk.inject_mode,
+            "safe": sk.safe,
         }, owner=user)
         if not ok:
             raise HTTPException(500, "Update failed")

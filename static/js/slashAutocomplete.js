@@ -81,6 +81,11 @@ function _flatten() {
   return out;
 }
 
+// Tasks R2–R6 (slash autocomplete includes published skills) are already
+// implemented here: _loadSkillEntries fetches /api/skills/slash-catalog,
+// _mergeSkills folds them into the base command list, and the
+// 'skills-catalog-changed' event (fired by skills.js after CRUD) refreshes
+// the merged list. Verified in place during Task 7 — no changes needed.
 async function _loadSkillEntries() {
   try {
     const res = await fetch('/api/skills/slash-catalog', { credentials: 'same-origin' });

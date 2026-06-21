@@ -682,6 +682,10 @@ function renderSkillsList() {
     card.className = 'doclib-card skill-card';
     card.dataset.skillName = name;
     card.dataset.skillStatus = sk.status || 'draft';
+    // Cache the typed skill object on the card so the structured editor
+    // form can populate from it (arrays/numbers/booleans) without parsing
+    // the raw markdown a second time.
+    card._skill = sk;
 
     const checked = _selectedNames.has(name) ? 'checked' : '';
     const cbHtml = _selectMode
@@ -699,6 +703,7 @@ function renderSkillsList() {
         ${sk.description ? `<div class="skill-card-desc">${esc(sk.description)}</div>` : ''}
       </div>
       <div class="skill-card-right">
+        ${_pinPill(sk, name)}
         ${_statusPill(sk)}
         ${_sourcePill(sk)}
         ${_auditModelPills(sk)}
@@ -912,6 +917,11 @@ function renderSkillsList() {
   // creates dozens of simultaneous /api/skills/<name>/markdown requests during
   // app startup and can peg uvicorn. Markdown is fetched lazily when a card is
   // expanded.
+
+  // Pin buttons live in every card header; delegate clicks at the container
+  // level so they survive re-renders. The pin state itself is fetched from
+  // the server (single source of truth) and cached per session.
+  _wirePinButtons();
 }
 
 // ---- Card expand / edit / actions ----
@@ -1028,8 +1038,332 @@ async function _expandSkillCard(card, name) {
   }
 }
 
-// Swap the read-only <pre> for an editable <textarea> (and back). The
-// Edit button toggles; a Save button commits via the markdown endpoint.
+// ---- Active-skill structured form (Spec 01 schema fields) ----
+//
+// The raw-markdown textarea below this form is still the escape hatch for
+// full-text edits, but the structured inputs here are the supported way to
+// edit the new active-skill fields: triggers, examples, tools_required,
+// tools_disabled, priority, pinned-default, temperature, max_tokens, and
+// inject_mode. Tool names are validated against /api/skills/tool-registry
+// (which mirrors src.tool_policy.known_tool_names) — tool gating narrows,
+// never elevates, so unknown names are rejected before save.
+
+let _toolRegistryPromise = null;
+let _toolRegistry = null;
+
+async function _loadToolRegistry() {
+  if (_toolRegistry) return _toolRegistry;
+  if (_toolRegistryPromise) return _toolRegistryPromise;
+  _toolRegistryPromise = (async () => {
+    try {
+      const res = await fetch(`${API}/api/skills/tool-registry`, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      _toolRegistry = new Set(Array.isArray(data.tools) ? data.tools : []);
+      return _toolRegistry;
+    } catch (e) {
+      // Fall back to an empty set — the validator will treat all tool names
+      // as unknown and surface them to the user, which is safer than
+      // silently allowing names we couldn't verify.
+      _toolRegistry = new Set();
+      return _toolRegistry;
+    }
+  })();
+  return _toolRegistryPromise;
+}
+
+// Parse the SKILL.md frontmatter lazily so the form can populate from the
+// raw markdown (the textarea) rather than waiting for a separate fetch.
+// Returns a {field: value} map of the active-skill fields, or {} on failure.
+function _parseFrontmatter(md) {
+  const out = {
+    triggers: [], examples: [], tools_required: [], tools_disabled: [],
+    priority: 0, pinned: false, temperature: null, max_tokens: null,
+    inject_mode: 'procedure',
+  };
+  if (!md || typeof md !== 'string') return out;
+  const m = md.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/);
+  if (!m) return out;
+  const fm = m[1];
+  // YAML-ish line scan. Values may be scalars or inline lists ([a, b] or
+  // `a, b`). Block sequences (- item) are also handled for triggers/etc.
+  const lines = fm.split('\n');
+  let curKey = null;
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '');
+    if (!line || line.startsWith('#')) { curKey = null; continue; }
+    const blockItem = line.match(/^\s*-\s+(.*)$/);
+    if (blockItem && curKey) {
+      const val = blockItem[1].trim().replace(/^["']|["']$/g, '');
+      if (Array.isArray(out[curKey])) out[curKey].push(val);
+      continue;
+    }
+    const kv = line.match(/^([a-z_]+)\s*:\s*(.*)$/i);
+    if (!kv) { curKey = null; continue; }
+    const key = kv[1];
+    let val = kv[2].trim();
+    if (val === '') { curKey = key; continue; }
+    curKey = key;
+    if (val.startsWith('[') && val.endsWith(']')) {
+      val = val.slice(1, -1);
+    }
+    if (key in out) {
+      if (Array.isArray(out[key])) {
+        out[key] = val.split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+      } else if (typeof out[key] === 'boolean') {
+        out[key] = /^(true|yes|on)$/i.test(val);
+      } else if (typeof out[key] === 'number') {
+        const n = Number(val);
+        out[key] = Number.isFinite(n) ? n : null;
+      } else {
+        out[key] = val.replace(/^["']|["']$/g, '');
+      }
+    }
+  }
+  return out;
+}
+
+function _renderActiveSkillForm(card, name, host, textarea) {
+  // Use the cached skill object (set by loadSkills) when available — it's
+  // already typed (arrays, numbers, booleans). Fall back to parsing the
+  // textarea so manual edits still populate the form on first open.
+  const sk = card._skill || skills.find(s => (s.name || s.id) === name) || {};
+  const md = textarea.value || card._md || '';
+  const parsed = _parseFrontmatter(md);
+  const fields = {
+    triggers: Array.isArray(sk.triggers) ? sk.triggers : parsed.triggers,
+    examples: Array.isArray(sk.examples) ? sk.examples : parsed.examples,
+    tools_required: Array.isArray(sk.tools_required) ? sk.tools_required : parsed.tools_required,
+    tools_disabled: Array.isArray(sk.tools_disabled) ? sk.tools_disabled : parsed.tools_disabled,
+    priority: typeof sk.priority === 'number' ? sk.priority : parsed.priority,
+    pinned: !!(sk.pinned ?? parsed.pinned),
+    temperature: sk.temperature != null ? sk.temperature : parsed.temperature,
+    max_tokens: sk.max_tokens != null ? sk.max_tokens : parsed.max_tokens,
+    inject_mode: sk.inject_mode || parsed.inject_mode || 'procedure',
+  };
+
+  const _row = (label, inputHtml, hint = '') =>
+    `<div class="skill-active-row"><label class="skill-active-label">${esc(label)}</label>` +
+    `<div class="skill-active-input">${inputHtml}${hint ? `<span class="skill-active-hint">${esc(hint)}</span>` : ''}</div></div>`;
+
+  host.innerHTML =
+    '<div class="skill-active-title">Active-skill fields</div>' +
+    _row('Triggers',
+      `<textarea class="skill-active-input-el skill-active-triggers" rows="2" spellcheck="false" placeholder="comma- or newline-separated phrases">${esc(fields.triggers.join('\n'))}</textarea>`,
+      'When the agent should activate this skill') +
+    _row('Examples',
+      `<textarea class="skill-active-input-el skill-active-examples" rows="2" spellcheck="false" placeholder="one example per line">${esc(fields.examples.join('\n'))}</textarea>`,
+      'Representative prompts that should trigger this skill') +
+    _row('Tools required',
+      `<input type="text" class="skill-active-input-el skill-active-tools-required" spellcheck="false" placeholder="comma-separated, e.g. bash, read_file" value="${esc(fields.tools_required.join(', '))}" />`,
+      'Tools the skill expects to call') +
+    _row('Tools disabled',
+      `<input type="text" class="skill-active-input-el skill-active-tools-disabled" spellcheck="false" placeholder="comma-separated" value="${esc(fields.tools_disabled.join(', '))}" />`,
+      'Tools to hide while this skill is active') +
+    '<div class="skill-active-row skill-active-row-grid">' +
+      _row('Priority', `<input type="number" class="skill-active-input-el skill-active-priority" value="${Number.isFinite(fields.priority) ? fields.priority : 0}" />`, 'Higher fires first') +
+      _row('Pinned default', `<label class="skill-active-checkbox"><input type="checkbox" class="skill-active-pinned" ${fields.pinned ? 'checked' : ''} /><span>Persist as pinned by default</span></label>`, 'Default state for new sessions') +
+    '</div>' +
+    '<div class="skill-active-row skill-active-row-grid">' +
+      _row('Temperature', `<input type="number" step="0.1" min="0" max="2" class="skill-active-input-el skill-active-temperature" placeholder="(default)" value="${fields.temperature != null ? fields.temperature : ''}" />`, 'Optional override') +
+      _row('Max tokens', `<input type="number" step="1" min="0" class="skill-active-input-el skill-active-max-tokens" placeholder="(default)" value="${fields.max_tokens != null ? fields.max_tokens : ''}" />`, 'Optional override; 0 allowed') +
+    '</div>' +
+    _row('Inject mode',
+      `<select class="skill-active-input-el skill-active-inject-mode">` +
+        `<option value="procedure" ${fields.inject_mode === 'procedure' ? 'selected' : ''}>procedure</option>` +
+        `<option value="directive" ${fields.inject_mode === 'directive' ? 'selected' : ''}>directive</option>` +
+      `</select>`,
+      'How the skill is injected into the prompt') +
+    '<div class="skill-active-preview skill-active-preview-empty">Tool-gate preview will appear here</div>';
+
+  const preview = host.querySelector('.skill-active-preview');
+  const required = host.querySelector('.skill-active-tools-required');
+  const disabled = host.querySelector('.skill-active-tools-disabled');
+  const refresh = () => _renderToolGatePreview(preview, required.value, disabled.value);
+  required.addEventListener('input', refresh);
+  disabled.addEventListener('input', refresh);
+  // Kick the tool-registry load + first preview render.
+  _loadToolRegistry().then(refresh).catch(refresh);
+}
+
+function _parseToolList(value) {
+  return String(value || '')
+    .split(/[,\n]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function _renderToolGatePreview(el, requiredValue, disabledValue) {
+  if (!el) return;
+  const required = _parseToolList(requiredValue);
+  const disabled = _parseToolList(disabledValue);
+  if (!required.length && !disabled.length) {
+    el.className = 'skill-active-preview skill-active-preview-empty';
+    el.textContent = 'Tool-gate preview will appear here';
+    return;
+  }
+  // "Adds" = tools_required (added to the active set). "Removes" =
+  // tools_disabled (subtracted). The resulting set is informational only —
+  // the server enforces the actual gate at dispatch time.
+  const allTools = _toolRegistry || new Set();
+  const unknownRequired = required.filter(t => !allTools.has(t));
+  const unknownDisabled = disabled.filter(t => !allTools.has(t));
+  const adds = required.filter(t => allTools.has(t));
+  const removes = disabled.filter(t => allTools.has(t));
+  // Resulting tool set = (all known tools - removes) ∪ adds. This mirrors
+  // what the dispatcher would expose if the skill were active alone.
+  const resulting = new Set([...allTools].filter(t => !removes.has(t)));
+  for (const t of adds) resulting.add(t);
+
+  const parts = [];
+  parts.push(`<div class="skill-active-preview-line"><span class="skill-active-preview-k">Adds:</span> <code>${adds.length ? esc(adds.join(', ')) : '(none)'}</code></div>`);
+  parts.push(`<div class="skill-active-preview-line"><span class="skill-active-preview-k">Removes:</span> <code>${removes.length ? esc(removes.join(', ')) : '(none)'}</code></div>`);
+  parts.push(`<div class="skill-active-preview-line"><span class="skill-active-preview-k">Resulting tool set:</span> <code>[${esc([...resulting].sort().join(', '))}]</code></div>`);
+  if (unknownRequired.length || unknownDisabled.length) {
+    const bad = [...new Set([...unknownRequired, ...unknownDisabled])];
+    parts.push(`<div class="skill-active-preview-warn">Unknown tool name(s): ${esc(bad.join(', '))}</div>`);
+  }
+  el.className = 'skill-active-preview' + (unknownRequired.length || unknownDisabled.length ? ' skill-active-preview-invalid' : '');
+  el.innerHTML = parts.join('');
+}
+
+function _validateActiveSkillForm(form) {
+  if (!form) return { ok: true };
+  const required = _parseToolList(form.querySelector('.skill-active-tools-required')?.value || '');
+  const disabled = _parseToolList(form.querySelector('.skill-active-tools-disabled')?.value || '');
+  const injectMode = form.querySelector('.skill-active-inject-mode')?.value || 'procedure';
+  if (injectMode && !['procedure', 'directive'].includes(injectMode)) {
+    return { ok: false, error: `Invalid inject_mode: ${injectMode}` };
+  }
+  // Tool gating narrows, never elevates: unknown names are rejected.
+  if (_toolRegistry && _toolRegistry.size) {
+    const unknown = [...new Set([...required, ...disabled])].filter(t => !_toolRegistry.has(t));
+    if (unknown.length) {
+      return { ok: false, error: `Unknown tool name(s): ${unknown.join(', ')}` };
+    }
+  }
+  // Validate numeric inputs parse cleanly when present.
+  const tempEl = form.querySelector('.skill-active-temperature');
+  const maxTokEl = form.querySelector('.skill-active-max-tokens');
+  if (tempEl && tempEl.value !== '') {
+    const t = Number(tempEl.value);
+    if (!Number.isFinite(t) || t < 0 || t > 2) {
+      return { ok: false, error: `temperature must be between 0 and 2 (got ${tempEl.value})` };
+    }
+  }
+  if (maxTokEl && maxTokEl.value !== '') {
+    const m = Number(maxTokEl.value);
+    if (!Number.isFinite(m) || m < 0 || !Number.isInteger(m)) {
+      return { ok: false, error: `max_tokens must be a non-negative integer (got ${maxTokEl.value})` };
+    }
+  }
+  return { ok: true };
+}
+
+function _collectActiveSkillFormUpdates(form) {
+  if (!form) return {};
+  const triggers = _parseToolList(form.querySelector('.skill-active-triggers')?.value || '');
+  const examples = _parseToolList(form.querySelector('.skill-active-examples')?.value || '');
+  const tools_required = _parseToolList(form.querySelector('.skill-active-tools-required')?.value || '');
+  const tools_disabled = _parseToolList(form.querySelector('.skill-active-tools-disabled')?.value || '');
+  const priorityRaw = form.querySelector('.skill-active-priority')?.value;
+  const priority = priorityRaw === '' || priorityRaw == null ? 0 : parseInt(priorityRaw, 10);
+  const pinned = !!form.querySelector('.skill-active-pinned')?.checked;
+  const tempRaw = form.querySelector('.skill-active-temperature')?.value;
+  const temperature = tempRaw === '' || tempRaw == null ? null : Number(tempRaw);
+  const maxTokRaw = form.querySelector('.skill-active-max-tokens')?.value;
+  const max_tokens = maxTokRaw === '' || maxTokRaw == null ? null : parseInt(maxTokRaw, 10);
+  const inject_mode = form.querySelector('.skill-active-inject-mode')?.value || 'procedure';
+  return {
+    triggers, examples, tools_required, tools_disabled,
+    priority, pinned,
+    temperature, max_tokens, inject_mode,
+  };
+}
+
+// ---- Session pin controls (server is single source of truth) ----
+
+let _pinnedSkillsCache = null;   // Set<string> for the current session
+
+async function _loadPinnedSkills() {
+  const sid = _currentSessionId();
+  if (!sid) { _pinnedSkillsCache = new Set(); return _pinnedSkillsCache; }
+  try {
+    const res = await fetch(`${API}/api/skills/pins?session_id=${encodeURIComponent(sid)}`, { credentials: 'same-origin' });
+    if (!res.ok) { _pinnedSkillsCache = new Set(); return _pinnedSkillsCache; }
+    const data = await res.json();
+    _pinnedSkillsCache = new Set(Array.isArray(data.pins) ? data.pins : []);
+    return _pinnedSkillsCache;
+  } catch {
+    _pinnedSkillsCache = new Set();
+    return _pinnedSkillsCache;
+  }
+}
+
+function _currentSessionId() {
+  try {
+    const sm = window.sessionModule;
+    return (sm && sm.getCurrentSessionId && sm.getCurrentSessionId()) || '';
+  } catch { return ''; }
+}
+
+async function _toggleSkillPin(name, currentlyPinned) {
+  const sid = _currentSessionId();
+  if (!sid) {
+    uiModule.showError('Open a session first to pin a skill.');
+    return false;
+  }
+  const endpoint = currentlyPinned ? 'unpin' : 'pin';
+  try {
+    const res = await fetch(`${API}/api/skills/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, session_id: sid }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    // Server is the single source of truth — refresh the cache from its reply.
+    _pinnedSkillsCache = new Set(Array.isArray(data.pins) ? data.pins : []);
+    uiModule.showToast(currentlyPinned ? 'Skill unpinned' : 'Skill pinned');
+    return true;
+  } catch (e) {
+    uiModule.showError(`Pin failed: ${e.message}`);
+    return false;
+  }
+}
+
+function _pinPill(sk, name) {
+  if (!_pinnedSkillsCache) return '';
+  const pinned = _pinnedSkillsCache.has(name);
+  const label = pinned ? 'Pinned' : 'Pin';
+  const cls = pinned ? ' skill-pin-pill skill-pin-pill-on' : ' skill-pin-pill';
+  return `<button class="memory-cat-badge${cls}" data-skill-pin="${esc(name)}" title="${pinned ? 'Unpin from this session' : 'Pin to this session'}">${label}</button>`;
+}
+
+// Wire pin/unpin clicks on the rendered cards. Delegated so it survives re-render.
+function _wirePinButtons() {
+  const container = document.getElementById('skills-list');
+  if (!container || container._pinWired) {
+    if (container) container._pinWired = true;
+    return;
+  }
+  container._pinWired = true;
+  container.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-skill-pin]');
+    if (!btn) return;
+    e.stopPropagation();
+    const name = btn.dataset.skillPin;
+    const currentlyPinned = btn.classList.contains('skill-pin-pill-on');
+    const ok = await _toggleSkillPin(name, currentlyPinned);
+    if (ok) {
+      // Re-render so the pin pill flips everywhere. The pin list comes
+      // from the server reply, so the next render reflects server truth.
+      renderSkillsList();
+    }
+  });
+}
+
+
 function _toggleSkillEdit(card, name) {
   const preview = card.querySelector('.skill-card-preview');
   if (!preview) return;
@@ -1040,6 +1374,17 @@ function _toggleSkillEdit(card, name) {
     return;
   }
   const pre = preview.querySelector('.skill-md-pre');
+  // Active-skill form: structured inputs for triggers, examples, tool gates,
+  // priority, pinned-default, temperature/max_tokens, and inject_mode. Lives
+  // ABOVE the raw-markdown textarea so the user can either edit the fields
+  // directly or drop down to the markdown for full-text edits. The form
+  // persists via PUT /api/skills/{name} (structured fields); the textarea
+  // below it persists via POST /api/skills/{name}/markdown.
+  const formHost = document.createElement('div');
+  formHost.className = 'skill-active-form';
+  formHost.addEventListener('click', (e) => e.stopPropagation());
+  preview.insertBefore(formHost, preview.firstChild);
+
   const ta = document.createElement('textarea');
   ta.className = 'skill-md-editor';
   ta.spellcheck = false;
@@ -1047,6 +1392,9 @@ function _toggleSkillEdit(card, name) {
   ta.addEventListener('click', (e) => e.stopPropagation());
   if (pre) pre.style.display = 'none';
   preview.insertBefore(ta, preview.querySelector('.doclib-card-expanded-actions'));
+  // Render the structured form AFTER the textarea is in the DOM so the
+  // _renderActiveSkillForm helper can find card._skill (loaded lazily below).
+  _renderActiveSkillForm(card, name, formHost, ta);
   ta.focus();
   // Flip the Edit button label to "Save".
   const editBtn = [...preview.querySelectorAll('.doclib-card-action-btn')].find(b => /Edit|Save/.test(b.textContent));
@@ -1057,6 +1405,46 @@ async function _saveSkillEdit(card, name) {
   const preview = card.querySelector('.skill-card-preview');
   const ta = preview?.querySelector('.skill-md-editor');
   if (!ta) return;
+
+  // Validate the structured form first — invalid tool names block the save
+  // (tool gating narrows, never elevates: unknown names are rejected).
+  const form = preview.querySelector('.skill-active-form');
+  if (form) {
+    const validation = _validateActiveSkillForm(form);
+    if (!validation.ok) {
+      uiModule.showError(validation.error);
+      return;
+    }
+    // Sync the structured form's values back into the textarea's frontmatter
+    // BEFORE the markdown save. Otherwise the markdown POST would re-parse
+    // the (stale) frontmatter in the textarea and clobber the structured
+    // PUT's changes — e.g. the user edits tools_required in the form, hits
+    // Save, and the markdown save immediately overwrites it with whatever
+    // was in the textarea before. Both saves must agree on the new values.
+    _syncFormToFrontmatter(form, ta);
+  }
+
+  // Save the structured fields via PUT /api/skills/{name}. The markdown
+  // save below re-parses the frontmatter separately, but the structured PUT
+  // is the source of truth for the form inputs (so a list edit doesn't
+  // require the user to also re-type the frontmatter in the textarea).
+  if (form) {
+    try {
+      const updates = _collectActiveSkillFormUpdates(form);
+      if (Object.keys(updates).length) {
+        const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (e) {
+      uiModule.showError('Save failed (fields): ' + e.message);
+      return;
+    }
+  }
+
   try {
     const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown`, {
       method: 'POST',
@@ -1072,6 +1460,76 @@ async function _saveSkillEdit(card, name) {
     uiModule.showError('Save failed: ' + e.message);
   }
 }
+
+// Rewrite the active-skill frontmatter keys inside a SKILL.md textarea so the
+// markdown save (which re-parses the frontmatter) agrees with the structured
+// form's current values. Preserves the frontmatter delimiter, key order,
+// and the body text below the closing ``---``. Keys absent from the source
+// frontmatter are appended (so a brand-new skill with no triggers line gets
+// one when the user adds triggers in the form). Null-valued optional fields
+// (temperature, max_tokens) are dropped entirely — emitting ``key:`` with no
+// value isn't valid YAML and the parser would reject the save.
+function _syncFormToFrontmatter(form, textarea) {
+  const md = textarea.value || '';
+  const m = md.match(/^---\s*\n([\s\S]*?)\n---\s*(\n[\s\S]*|$)/);
+  if (!m) return;   // No frontmatter — the markdown save will reject it.
+  let fm = m[1];
+  const body = m[2];
+  const updates = _collectActiveSkillFormUpdates(form);
+  const lines = fm.split('\n');
+  const seenKeys = new Set();
+  const updated = [];
+  let curKey = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const blockItem = line.match(/^\s*-\s+(.*)$/);
+    if (blockItem && curKey && Array.isArray(updates[curKey])) {
+      // Skip — these block-sequence lines are replaced below the key.
+      continue;
+    }
+    const kv = line.match(/^([a-z_]+)\s*:\s*(.*)$/i);
+    if (!kv) {
+      // Preserve non-kv lines (comments, blank lines) verbatim.
+      if (!line.trim()) curKey = null;
+      updated.push(line);
+      continue;
+    }
+    const key = kv[1];
+    curKey = key;
+    if (key in updates) {
+      seenKeys.add(key);
+      // Drop the line entirely when the value is null (optional field
+      // cleared) — emitting ``key:`` with no value isn't valid YAML.
+      if (updates[key] == null) continue;
+      updated.push(_formatFrontmatterLine(key, updates[key]));
+    } else {
+      updated.push(line);
+    }
+  }
+  // Append any active-skill keys that weren't in the source frontmatter.
+  // Skip null values (same reason as above).
+  for (const key of ['triggers', 'examples', 'tools_required', 'tools_disabled',
+                     'priority', 'pinned', 'temperature', 'max_tokens', 'inject_mode']) {
+    if (!(key in updates)) continue;
+    if (seenKeys.has(key)) continue;
+    if (updates[key] == null) continue;
+    updated.push(_formatFrontmatterLine(key, updates[key]));
+  }
+  textarea.value = `---\n${updated.join('\n')}\n---${body}`;
+}
+
+function _formatFrontmatterLine(key, value) {
+  if (Array.isArray(value)) {
+    if (!value.length) return `${key}: []`;
+    return `${key}: [${value.map(v => String(v).includes(',') ? JSON.stringify(v) : v).join(', ')}]`;
+  }
+  if (typeof value === 'boolean') return `${key}: ${value}`;
+  if (typeof value === 'number') return `${key}: ${value}`;
+  if (value == null) return null;   // Caller must skip null lines.
+  return `${key}: ${value}`;
+}
+
+
 
 async function _deleteSkill(name, card = null) {
   if (!(await uiModule.styledConfirm(`Delete skill "${name}"? This removes the SKILL.md.`, { confirmText: 'Delete', danger: true }))) return;
@@ -1964,4 +2422,10 @@ export default { loadSkills, openSkill };
 
 // Populate the Skills badge on first load so the count is right before the
 // user clicks into the tab. Cheap fetch — same as the lazy path.
-document.addEventListener('DOMContentLoaded', () => { loadSkills(); });
+document.addEventListener('DOMContentLoaded', () => {
+  // Pre-fetch the pinned-skill list so the pin pill renders correctly on
+  // the first paint. The server is the single source of truth for pin
+  // state; re-render once the cache is populated.
+  _loadPinnedSkills().then(() => { renderSkillsList(); }).catch(() => {});
+  loadSkills();
+});
