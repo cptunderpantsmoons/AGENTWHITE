@@ -204,6 +204,51 @@ class TestPersistence:
 
 
 # --------------------------------------------------------------------------
+# Multi-worker cache invalidation (mtime)
+# --------------------------------------------------------------------------
+
+
+class TestMtimeInvalidation:
+    def test_external_write_is_picked_up_without_cache_clear(self, _data_dir):
+        """When another process writes to the pin file, this process's
+        cached copy must be invalidated by an mtime check on the next
+        read. This closes the multi-worker correctness gap where each
+        worker has its own in-memory cache."""
+        store = SessionSkillPins(_pins_file(_data_dir))
+        store.pin_skill("sess-a", "planning")
+        assert store.list_pinned_skills("sess-a") == ["planning"]
+
+        # Simulate a second worker writing to the same file behind this
+        # store's back. Use a fresh SessionSkillPins instance + atomic write
+        # so the on-disk mtime advances, then read from the original store.
+        import time
+
+        other = SessionSkillPins(_pins_file(_data_dir))
+        other.pin_skill("sess-a", "coding")
+        # Ensure mtime ticks forward (some filesystems have 1s resolution).
+        time.sleep(0.01)
+
+        # The first store's cache should be invalidated by the mtime check.
+        assert set(store.list_pinned_skills("sess-a")) == {"planning", "coding"}
+
+    def test_external_unpin_is_reflected_without_cache_clear(self, _data_dir):
+        """An external unpin (e.g. another worker) must be visible to this
+        store on the next read without an explicit cache_clear()."""
+        store = SessionSkillPins(_pins_file(_data_dir))
+        store.pin_skill("sess-a", "planning")
+        store.pin_skill("sess-a", "coding")
+        assert set(store.list_pinned_skills("sess-a")) == {"planning", "coding"}
+
+        import time
+
+        other = SessionSkillPins(_pins_file(_data_dir))
+        assert other.unpin_skill("sess-a", "planning") is True
+        time.sleep(0.01)
+
+        assert store.list_pinned_skills("sess-a") == ["coding"]
+
+
+# --------------------------------------------------------------------------
 # Concurrency
 # --------------------------------------------------------------------------
 

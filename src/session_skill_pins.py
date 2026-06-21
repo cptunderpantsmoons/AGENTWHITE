@@ -57,12 +57,22 @@ class SessionSkillPins:
     :func:`default_store`) is reused across requests so writes from one
     request are visible to the next. All mutations are serialized by an
     in-process lock; the on-disk file is written atomically.
+
+    Multi-worker safety: an mtime check on the underlying file invalidates
+    the in-process cache when another worker writes to the file, so a
+    deployment running multiple processes sees fresh pin state on the next
+    read without an explicit cache clear.
     """
 
     def __init__(self, path: Optional[str] = None):
         self._path = path or _default_pins_file()
         self._lock = threading.Lock()
         self._cache: Optional[Dict[str, List[str]]] = None
+        # Tracks the mtime of the file the cache was loaded from. ``None``
+        # means the cache is empty (either never populated, or the file
+        # was missing last time we checked). On the next read, a missing
+        # file or a changed mtime triggers a fresh load.
+        self._cache_mtime: Optional[float] = None
 
     @property
     def path(self) -> str:
@@ -72,16 +82,32 @@ class SessionSkillPins:
     # Disk I/O
     # ------------------------------------------------------------------
 
+    def _current_mtime(self) -> Optional[float]:
+        """Return the file's mtime, or ``None`` if it doesn't exist."""
+        try:
+            return os.path.getmtime(self._path)
+        except OSError:
+            return None
+
     def _load(self) -> Dict[str, List[str]]:
         """Read the on-disk pin file, recovering from corruption.
 
         Returns an empty dict when the file is missing or unparseable.
         The cache is populated on first access so subsequent reads in the
-        same process do not re-hit disk.
+        same process do not re-hit disk. An mtime check invalidates the
+        cache when the underlying file has changed (e.g. another worker
+        wrote to it), so multi-worker deployments see fresh pin state.
         """
         if self._cache is not None:
-            return self._cache
+            current_mtime = self._current_mtime()
+            if current_mtime == self._cache_mtime:
+                return self._cache
+            # mtime changed (or the file appeared/disappeared): fall through
+            # and reload. Clearing first keeps the stale dict out of memory
+            # while we re-read.
+            self._cache = None
         data: Dict[str, List[str]] = {}
+        mtime: Optional[float] = None
         if os.path.exists(self._path):
             try:
                 with open(self._path, encoding="utf-8") as f:
@@ -97,12 +123,18 @@ class SessionSkillPins:
                             ]
                             if cleaned:
                                 data[sid] = cleaned
+                mtime = self._current_mtime()
             except (OSError, ValueError) as exc:
                 logger.warning(
                     "session_skills.json was corrupt (%s); starting empty", exc
                 )
                 data = {}
+                # The corrupt file still has an mtime; track it so we only
+                # re-attempt the parse if it changes again (avoids re-logging
+                # the same warning on every read).
+                mtime = self._current_mtime()
         self._cache = data
+        self._cache_mtime = mtime
         return data
 
     def _save(self, data: Dict[str, List[str]]) -> None:
@@ -121,6 +153,9 @@ class SessionSkillPins:
                 json.dump(data, f, indent=2)
             os.replace(tmp, self._path)
         self._cache = data
+        # Refresh the tracked mtime so our own write doesn't trigger a
+        # spurious reload on the next read.
+        self._cache_mtime = self._current_mtime()
 
     # ------------------------------------------------------------------
     # Public API

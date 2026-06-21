@@ -461,7 +461,9 @@ async def test_refresh_preserves_pins(tmp_path):
 @pytest.mark.asyncio
 async def test_slash_invocation_does_not_replace_pinned_skill(tmp_path):
     """If a user has ``planning`` pinned and then invokes ``/coding`` via
-    slash for one turn, the ``planning`` pin must survive."""
+    slash for one turn, the ``planning`` pin must survive AND the
+    slash-invoked ``coding`` skill must NOT be added to the pin list
+    (Task 6 brief requirement #5: single-turn invocation, ephemeral)."""
     skills_root = tmp_path / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
     _write_skill_md(skills_root, name="planning", owner="alice")
@@ -484,6 +486,9 @@ async def test_slash_invocation_does_not_replace_pinned_skill(tmp_path):
     # ``planning`` must still be pinned (slash does not replace).
     pinned = set(session_skill_pins.list_pinned_skills("sess-a"))
     assert "planning" in pinned
+    # The slash-invoked skill is ephemeral — it must NOT be persisted as a pin.
+    assert "coding" not in pinned
+    assert session_skill_pins.list_pinned_skills("sess-a") == ["planning"]
 
 
 # --------------------------------------------------------------------------

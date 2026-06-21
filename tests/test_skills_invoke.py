@@ -93,7 +93,11 @@ def _clear_session_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_invoke_skill_sets_active_skill_and_returns_metadata(tmp_path):
+async def test_invoke_skill_returns_metadata_without_pinning(tmp_path):
+    """Slash invocation is ephemeral — it takes precedence over pins for the
+    single turn it was invoked on, then it is gone. The /invoke endpoint must
+    NOT persist the slash-invoked skill as a pin (Task 6 brief requirement #5:
+    "single-turn invocation … for that turn only")."""
     skills_root = tmp_path / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -124,7 +128,9 @@ async def test_invoke_skill_sets_active_skill_and_returns_metadata(tmp_path):
     assert skill["tools_required"] == ["bash"]
     # ask_user is a safety tool and must be stripped even if declared disabled.
     assert skill["tools_disabled"] == []
-    assert session_skill_state.get_active_skills("sess-active") == ["demo-skill"]
+    # Slash invocation is ephemeral — it must NOT persist as a pin.
+    assert session_skill_state.get_active_skills("sess-active") == []
+    assert session_skill_pins.list_pinned_skills("sess-active") == []
 
 
 @pytest.mark.asyncio
@@ -195,7 +201,8 @@ async def test_invoke_project_local_skill_resolves_and_records_use(tmp_path):
     assert result["skill"]["name"] == "local-skill"
     assert result["skill"]["triggers"] == ["local"]
     assert result["skill"]["tools_required"] == ["Read"]
-    assert session_skill_state.get_active_skills("sess-project") == ["local-skill"]
+    # Slash invocation is ephemeral — it does NOT pin the skill.
+    assert session_skill_state.get_active_skills("sess-project") == []
 
     project_entries = project_sm.load_all()
     assert len(project_entries) == 1
@@ -222,7 +229,8 @@ async def test_invoke_owned_skill_when_auth_disabled(tmp_path, monkeypatch):
     result = await handler(_request(None), body)
     assert result["ok"] is True
     assert result["skill"]["name"] == "demo-skill"
-    assert session_skill_state.get_active_skills("sess-anon") == ["demo-skill"]
+    # Slash invocation is ephemeral — it does NOT pin the skill.
+    assert session_skill_state.get_active_skills("sess-anon") == []
 
 
 @pytest.mark.asyncio

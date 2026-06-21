@@ -23,7 +23,7 @@ from src.session_skill_pins import (
     pin_skill,
     unpin_skill,
 )
-from src.session_skill_state import get_active_skills, set_active_skill
+from src.session_skill_state import get_active_skills
 from src.skill_dispatcher import SkillDispatcher
 from core.middleware import require_admin
 
@@ -1180,11 +1180,15 @@ def setup_skills_routes(
 
     @router.post("/invoke")
     async def invoke_skill_active(request: Request, body: SkillInvokeRequest):
-        """Record a slash skill as active for the session and return its metadata.
+        """Resolve a slash-invoked skill and return its metadata.
 
-        The client still sends the user's original ``/<skill-name> ...`` message
-        on success; downstream code (the agent loop) is responsible for injecting
-        the returned markdown as an untrusted user-role message.
+        Slash invocation is **ephemeral**: it takes precedence over pins for
+        the single turn it was invoked on (dispatcher stage 1), but it is
+        NOT persisted as a pin (Task 6 brief requirement #5: "single-turn
+        invocation … for that turn only"). The client still sends the user's
+        original ``/<skill-name> ...`` message on success; downstream code
+        (the agent loop) is responsible for injecting the returned markdown
+        as an untrusted user-role message.
         """
         user = _owner(request)
         if user is None and not _auth_disabled():
@@ -1196,7 +1200,7 @@ def setup_skills_routes(
 
         # Project-local roots are loaded when a project manager is configured;
         # workspace is not required. Session-pinned skills are included so
-        # repeated slash calls still resolve correctly.
+        # the dispatcher can still see existing pins alongside this slash call.
         resolved = dispatcher.resolve_active_skills(
             slash_input,
             session_id=body.session_id,
@@ -1233,9 +1237,12 @@ def setup_skills_routes(
         except Exception:
             logger.warning("Failed to record skill use for %s", skill.name, exc_info=True)
 
-        set_active_skill(body.session_id, skill.name)
+        # NOTE: deliberately NOT calling set_active_skill() here — slash
+        # invocation is a single-turn signal. The dispatcher's stage 1 picks
+        # up the slash name from the message text on the very same turn, so
+        # the skill activates for this turn without being persisted as a pin.
         logger.info(
-            "Active skill set for session %s: %s (owner=%s)",
+            "Slash skill invoked for session %s: %s (owner=%s, ephemeral)",
             body.session_id,
             skill.name,
             user,
