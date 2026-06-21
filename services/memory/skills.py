@@ -31,6 +31,59 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Reserved skill-name sentinels (single source of truth)
+# ---------------------------------------------------------------------------
+
+# Reserved sentinels that a skill name must never collide with. Skill names
+# double as agent slash commands (``/<skill-name>``), as on-disk directory
+# names under ``data/skills/``, and as owner-attribution keys in usage
+# sidecars — a collision with a synthetic-owner sentinel (e.g.
+# ``internal-tool``) would let a user-authored skill masquerade as the
+# in-process tool loopback, or as the bearer-token owner attribution
+# sentinel (``api``). ``admin`` is reserved because the auth layer treats
+# it as the privileged default account name; a skill named ``admin``
+# would shadow it in owner-keyed lookups. ``demo``/``system`` round out
+# the synthetic-owner set the rest of the codebase already special-cases.
+# Keep in sync with ``core.auth.RESERVED_USERNAMES`` plus ``admin``.
+#
+# This is the SINGLE source of truth for the reserved set — the route
+# layer (``routes/skills_routes.py:RESERVED_SKILL_NAMES``) re-exports it
+# so existing imports keep working, and ``import_bundle_from_files``
+# reads it directly so the import path is covered too. Keeping the set
+# here avoids a circular import (routes depends on services, not the
+# other way around).
+RESERVED_SKILL_NAMES = frozenset({
+    "internal-tool", "api", "demo", "system", "admin",
+})
+
+
+def _validate_skill_name_reserved(name: Optional[str]) -> None:
+    """Reject a skill name that collides with a reserved sentinel.
+
+    Skill names are slugified before they hit disk, but slugify only
+    lowercases and strips non-alphanumerics — it preserves the dash, so
+    a hand-crafted bundle whose SKILL.md frontmatter is ``name:
+    internal-tool`` would survive slugify unchanged and create a
+    directory ``data/skills/imported/internal-tool/``. That collides
+    with the synthetic-owner sentinel of the same name, which the auth
+    layer treats as the in-process tool loopback user.
+
+    Raises ``SkillImportError`` (a ``ValueError`` subclass) so the
+    caller's existing ``except SkillImportError`` handler converts it
+    to HTTP 400. Imported lazily to avoid an import cycle at module
+    load time.
+    """
+    candidate = (name or "").strip().lower()
+    if not candidate:
+        return  # caller's required-field validation handles empty names
+    if candidate in RESERVED_SKILL_NAMES:
+        from .skill_importer import SkillImportError
+        raise SkillImportError(
+            f"Skill name {name!r} is reserved and cannot be used."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Token / similarity helpers (kept for the relevance fallback)
 # ---------------------------------------------------------------------------
 
@@ -423,6 +476,14 @@ class SkillsManager:
         _rel, skill_md = pick_skill_md(files)
         sk = Skill.from_markdown(skill_md)
         nm = slugify(sk.name or _rel.split("/")[-2] or "skill")
+        # Reserved-sentinel check: slugify preserves the dash, so a bundle
+        # whose SKILL.md frontmatter is ``name: internal-tool`` (or any of
+        # the other synthetic-owner sentinels) would survive unchanged and
+        # create a directory that collides with the in-process tool loopback
+        # user / bearer-token owner sentinel / admin account. Reject here so
+        # every caller of import_bundle_from_files (the /import-from-url
+        # route, any future admin tooling) gets the check for free.
+        _validate_skill_name_reserved(nm)
         cat = slugify(category or sk.category or "imported", fallback="imported")
 
         existing = {s["name"] for s in self.load_all()}

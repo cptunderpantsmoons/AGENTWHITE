@@ -16,7 +16,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from services.memory.skills import SkillsManager
+from services.memory.skills import SkillsManager, RESERVED_SKILL_NAMES
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.session_skill_pins import (
     list_pinned_skills,
@@ -148,9 +148,14 @@ class SkillUpdateRequest(BaseModel):
 # round out the synthetic-owner set the rest of the codebase already
 # special-cases. Keep in sync with ``core.auth.RESERVED_USERNAMES`` plus
 # ``admin``.
-RESERVED_SKILL_NAMES = frozenset({
-    "internal-tool", "api", "demo", "system", "admin",
-})
+#
+# The set is defined ONCE in ``services.memory.skills`` (the storage
+# layer) so ``import_bundle_from_files`` can use the same check on the
+# import path without importing routes (which would create a cycle).
+# The import at the top of this module re-exports it here for backward
+# compatibility with existing test imports
+# (``tests/test_skills_reserved_names.py``) and for the route's own
+# ``_validate_skill_name`` helper.
 
 
 def _validate_skill_name(name: Optional[str]) -> None:
