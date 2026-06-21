@@ -75,13 +75,11 @@ def _request(user: str | None = "alice") -> Request:
 @pytest.fixture(autouse=True)
 def _clear_session_state():
     """Keep session-skill state isolated between tests."""
-    session_skill_state.clear_active_skill("sess-active")
-    session_skill_state.clear_active_skill("sess-404")
-    session_skill_state.clear_active_skill("sess-403")
+    for sid in ("sess-active", "sess-404", "sess-403", "sess-project", "sess-anon", "sess-auth"):
+        session_skill_state.clear_active_skill(sid)
     yield
-    session_skill_state.clear_active_skill("sess-active")
-    session_skill_state.clear_active_skill("sess-404")
-    session_skill_state.clear_active_skill("sess-403")
+    for sid in ("sess-active", "sess-404", "sess-403", "sess-project", "sess-anon", "sess-auth"):
+        session_skill_state.clear_active_skill(sid)
 
 
 @pytest.mark.asyncio
@@ -138,7 +136,7 @@ async def test_invoke_unknown_skill_returns_404(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_invoke_other_owner_skill_returns_403(tmp_path):
+async def test_invoke_other_owner_skill_returns_404(tmp_path):
     skills_root = tmp_path / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
     _write_skill_md(skills_root, name="private-skill", owner="bob")
@@ -153,8 +151,68 @@ async def test_invoke_other_owner_skill_returns_403(tmp_path):
     body = SkillInvokeRequest(name="private-skill", args="", session_id="sess-403")
     with pytest.raises(HTTPException) as exc_info:
         await handler(_request("alice"), body)
-    assert exc_info.value.status_code == 403
+    assert exc_info.value.status_code == 404
     assert session_skill_state.get_active_skills("sess-403") == []
+
+
+@pytest.mark.asyncio
+async def test_invoke_project_local_skill_resolves_and_records_use(tmp_path):
+    global_root = tmp_path / "global"
+    global_root.mkdir(parents=True, exist_ok=True)
+    global_sm = SkillsManager(str(global_root))
+
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(
+        project_root / "skills",
+        name="local-skill",
+        owner="alice",
+        triggers=["local"],
+        tools_required=["Read"],
+    )
+    project_sm = SkillsManager(str(project_root))
+
+    router = setup_skills_routes(global_sm, project_sm)
+    handler = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/skills/invoke" and "POST" in route.methods
+    )
+
+    body = SkillInvokeRequest(name="local-skill", args="do it", session_id="sess-project")
+    result = await handler(_request("alice"), body)
+
+    assert result["ok"] is True
+    assert result["skill"]["name"] == "local-skill"
+    assert result["skill"]["triggers"] == ["local"]
+    assert result["skill"]["tools_required"] == ["Read"]
+    assert session_skill_state.get_active_skills("sess-project") == ["local-skill"]
+
+    project_entries = project_sm.load_all()
+    assert len(project_entries) == 1
+    assert project_entries[0]["uses"] == 1
+
+
+@pytest.mark.asyncio
+async def test_invoke_owned_skill_when_auth_disabled(tmp_path, monkeypatch):
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    _write_skill_md(skills_root, name="demo-skill", owner="alice")
+
+    sm = SkillsManager(str(tmp_path))
+    router = setup_skills_routes(sm)
+    handler = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/skills/invoke" and "POST" in route.methods
+    )
+
+    import routes.skills_routes as skills_routes_module
+    monkeypatch.setattr(skills_routes_module, "_auth_disabled", lambda: True)
+
+    body = SkillInvokeRequest(name="demo-skill", args="", session_id="sess-anon")
+    result = await handler(_request(None), body)
+    assert result["ok"] is True
+    assert result["skill"]["name"] == "demo-skill"
+    assert session_skill_state.get_active_skills("sess-anon") == ["demo-skill"]
 
 
 @pytest.mark.asyncio

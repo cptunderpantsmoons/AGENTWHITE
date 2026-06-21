@@ -42,6 +42,7 @@ class ResolvedSkill:
     max_tokens: Optional[int] = None
     inject_mode: str = "procedure"
     reason: str = "relevance"
+    source_manager: Optional[Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -146,7 +147,10 @@ class SkillDispatcher:
     def _load_skills(
         self, owner: Optional[str], workspace: Optional[str]
     ) -> tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Load global skills and, with a workspace, project-local skills.
+        """Load global skills and project-local skills.
+
+        Project-local skills are loaded whenever a project manager is
+        configured, regardless of the ``workspace`` argument.
 
         Returns a tuple of:
           - merged skills by name (project overrides global)
@@ -169,7 +173,7 @@ class SkillDispatcher:
 
         project_skills_by_name: Dict[str, Dict[str, Any]] = {}
         project_skills_list: List[Dict[str, Any]] = []
-        if workspace and self.project_manager is not None:
+        if self.project_manager is not None:
             try:
                 for skill in self._manager_load(self.project_manager, owner):
                     name = skill.get("name")
@@ -249,6 +253,7 @@ class SkillDispatcher:
             max_tokens=skill.get("max_tokens"),
             inject_mode=str(skill.get("inject_mode") or "procedure"),
             reason=reason,
+            source_manager=skill.get("_dispatcher_source") or self.global_manager,
         )
 
     def _read_markdown(self, skill: Dict[str, Any]) -> str:

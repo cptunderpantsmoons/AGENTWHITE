@@ -506,6 +506,41 @@ class TestProjectOnlyRelevanceFallback:
         assert results[0].reason == "relevance"
 
 
+class TestProjectLoadingWithoutWorkspace:
+    def test_project_skills_load_without_workspace(self):
+        project_mgr = FakeSkillsManager(
+            [_skill("localskill", "Project-local skill")]
+        )
+        dispatcher = SkillDispatcher(
+            skills_manager=FakeSkillsManager([]),
+            project_skills_manager=project_mgr,
+        )
+        results = dispatcher.resolve_active_skills("/localskill")
+        assert len(results) == 1
+        assert results[0].name == "localskill"
+        assert results[0].reason == "slash"
+
+    def test_resolved_skill_source_manager_points_to_project_manager(self):
+        global_mgr = FakeSkillsManager([_skill("shared", "Global shared")])
+        project_mgr = FakeSkillsManager([_skill("localonly", "Project only")])
+        dispatcher = SkillDispatcher(global_mgr, project_skills_manager=project_mgr)
+
+        global_result = dispatcher.resolve_active_skills("/shared")[0]
+        assert global_result.source_manager is global_mgr
+
+        project_result = dispatcher.resolve_active_skills("/localonly")[0]
+        assert project_result.source_manager is project_mgr
+
+    def test_resolved_skill_to_dict_omits_source_manager(self):
+        project_mgr = FakeSkillsManager([_skill("localonly", "Project only")])
+        dispatcher = SkillDispatcher(
+            skills_manager=None,
+            project_skills_manager=project_mgr,
+        )
+        result = dispatcher.resolve_active_skills("/localonly")[0]
+        assert "source_manager" not in result.to_dict()
+
+
 class TestAskUserStripping:
     def test_ask_user_removed_from_tools_disabled(self):
         mgr = FakeSkillsManager(

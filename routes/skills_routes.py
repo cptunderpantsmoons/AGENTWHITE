@@ -1103,22 +1103,6 @@ def setup_skills_routes(
         if skill.get("owner") != user:
             raise HTTPException(404, "Skill not found")
 
-    def _skill_exists_for_other_owner(name: str, user: Optional[str]) -> bool:
-        """Return True when ``name`` exists but belongs to someone else.
-
-        Used to distinguish 403 (access denied) from 404 (not found) without
-        leaking owner-scoped skill names across users.
-        """
-        try:
-            all_skills = skills_manager.load_all()
-        except Exception:
-            return False
-        match = next((s for s in all_skills if s.get("name") == name), None)
-        if not match:
-            return False
-        owner = match.get("owner")
-        return bool(owner and owner != user)
-
     def _fire_skill_added(user: Optional[str]):
         try:
             from src.event_bus import fire_event
@@ -1186,9 +1170,9 @@ def setup_skills_routes(
         if body.args:
             slash_input += f" {body.args}"
 
-        # Project-local roots are Phase 3; pass workspace=None to fall back to
-        # global skills for now. Session-pinned skills are included so repeated
-        # slash calls still resolve correctly.
+        # Project-local roots are loaded when a project manager is configured;
+        # workspace is not required. Session-pinned skills are included so
+        # repeated slash calls still resolve correctly.
         resolved = dispatcher.resolve_active_skills(
             slash_input,
             session_id=body.session_id,
@@ -1198,13 +1182,14 @@ def setup_skills_routes(
         )
 
         if not resolved or resolved[0].reason != "slash":
-            if _skill_exists_for_other_owner(body.name, user):
-                raise HTTPException(403, "Access denied")
+            # Return 404 for both missing skills and skills owned by another
+            # user so we do not leak skill-name existence across users.
             raise HTTPException(404, "Skill not found")
 
         skill = resolved[0]
+        source_manager = skill.source_manager or skills_manager
         try:
-            skills_manager.record_use(skill.name, owner=user)
+            source_manager.record_use(skill.name, owner=user)
         except Exception:
             logger.warning("Failed to record skill use for %s", skill.name, exc_info=True)
 
