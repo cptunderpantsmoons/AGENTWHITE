@@ -136,7 +136,7 @@ async def test_invoke_unknown_skill_returns_404(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_invoke_other_owner_skill_returns_404(tmp_path):
+async def test_invoke_other_owner_skill_returns_403(tmp_path):
     skills_root = tmp_path / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
     _write_skill_md(skills_root, name="private-skill", owner="bob")
@@ -151,7 +151,7 @@ async def test_invoke_other_owner_skill_returns_404(tmp_path):
     body = SkillInvokeRequest(name="private-skill", args="", session_id="sess-403")
     with pytest.raises(HTTPException) as exc_info:
         await handler(_request("alice"), body)
-    assert exc_info.value.status_code == 404
+    assert exc_info.value.status_code == 403
     assert session_skill_state.get_active_skills("sess-403") == []
 
 

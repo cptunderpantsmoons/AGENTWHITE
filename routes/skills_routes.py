@@ -1182,8 +1182,24 @@ def setup_skills_routes(
         )
 
         if not resolved or resolved[0].reason != "slash":
-            # Return 404 for both missing skills and skills owned by another
-            # user so we do not leak skill-name existence across users.
+            # For authenticated users, distinguish a missing skill (404) from a
+            # skill that exists under another owner (403). In auth-disabled mode
+            # (user is None) the dispatcher already resolved without ownership
+            # filtering, so any remaining miss is a genuine 404.
+            if user is not None:
+                other_owners = []
+                for maybe_mgr in (skills_manager, project_skills_manager):
+                    if maybe_mgr is None:
+                        continue
+                    try:
+                        other_owners.extend(maybe_mgr.load_all())
+                    except Exception:
+                        pass
+                if any(
+                    s.get("name") == body.name and s.get("owner") != user
+                    for s in other_owners
+                ):
+                    raise HTTPException(403, "Access to skill denied")
             raise HTTPException(404, "Skill not found")
 
         skill = resolved[0]
