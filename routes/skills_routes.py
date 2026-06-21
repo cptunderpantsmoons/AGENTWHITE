@@ -184,6 +184,46 @@ def _validate_tool_names(*lists) -> None:
         raise HTTPException(400, f"Unknown tool name(s): {', '.join(unknown)}")
 
 
+def _validate_active_skill_ranges(
+    *,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+) -> None:
+    """Reject out-of-range ``temperature`` / ``max_tokens`` with HTTP 400.
+
+    Server-side backstop for the client-side number inputs: a hand-crafted
+    PUT/POST/markdown-save could send arbitrary values, and silently
+    persisting them would let a skill inject a ``temperature`` of 99 or a
+    negative ``max_tokens`` into the next LLM call. The dispatcher trusts
+    the on-disk frontmatter, so the route must clamp at the boundary.
+
+    Follows the same fail-closed pattern as ``_validate_tool_names``:
+    ``None`` (field not set) is always valid. Boundaries are inclusive:
+    ``temperature=0`` and ``temperature=2`` are valid, as is
+    ``max_tokens=0`` (which means "no override" for some upstreams).
+    """
+    if temperature is not None:
+        try:
+            t = float(temperature)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"temperature must be a number, got {temperature!r}")
+        if not (0.0 <= t <= 2.0):
+            raise HTTPException(
+                400,
+                f"temperature must be in [0, 2], got {t}",
+            )
+    if max_tokens is not None:
+        try:
+            mt = int(max_tokens)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"max_tokens must be an integer, got {max_tokens!r}")
+        if mt < 0:
+            raise HTTPException(
+                400,
+                f"max_tokens must be >= 0, got {mt}",
+            )
+
+
 def _skill_test_task(skill: dict) -> str:
     """Build a self-contained test task. Many skills act ON something (a doc,
     an email); if we just hand over the 'when to use' text the agent has nothing
@@ -780,12 +820,17 @@ def _apply_skill_md(skills_manager, name: str, md: str, owner) -> bool:
             # Active-skill schema extensions (Spec 01). Round-trip the parsed
             # frontmatter through update_skill so the audit's self-edit / teacher
             # rewrite preserves triggers, tool gates, priority, pinned-default,
-            # temperature/max_tokens, inject_mode, and safe.
+            # temperature/max_tokens, and inject_mode. `safe` is NOT forwarded
+            # here either — the audit's rewriter parses user-controllable
+            # frontmatter, and forwarding `safe` would let a hand-edited
+            # SKILL.md flip the safety-critical flag through the audit path
+            # (#task-07 fix 2). Only the admin audit flow (set_safe) may
+            # write `safe`.
             "triggers": sk.triggers, "examples": sk.examples,
             "tools_required": sk.tools_required, "tools_disabled": sk.tools_disabled,
             "priority": sk.priority, "pinned": sk.pinned,
             "temperature": sk.temperature, "max_tokens": sk.max_tokens,
-            "inject_mode": sk.inject_mode, "safe": sk.safe,
+            "inject_mode": sk.inject_mode,
         }, owner=owner))
     except Exception as e:
         logger.warning(f"Audit: could not save edited skill {name}: {e}")
@@ -1621,6 +1666,13 @@ def setup_skills_routes(
         # this guards against a fetch failure, a hand-crafted POST, or a
         # third-party client.
         _validate_tool_names(body.tools_required, body.tools_disabled)
+        # Range validation backstop: reject out-of-range temperature /
+        # max_tokens before they reach SkillsManager so the on-disk skill
+        # can never carry a value the dispatcher would inject into the
+        # next LLM call. None (field not set) is always valid.
+        _validate_active_skill_ranges(
+            temperature=body.temperature, max_tokens=body.max_tokens
+        )
         entry = skills_manager.add_skill(
             # New shape
             name=body.name,
@@ -1940,6 +1992,13 @@ def setup_skills_routes(
         # the dispatcher would silently drop (tool gating narrows, never
         # elevates). The structured PUT/POST /add paths check the same set.
         _validate_tool_names(sk.tools_required, sk.tools_disabled)
+        # Range validation backstop: a hand-edited SKILL.md could set
+        # temperature: 99 or max_tokens: -1; reject before persisting so
+        # the dispatcher never injects an out-of-range value into an LLM
+        # call. None (field not present) is always valid.
+        _validate_active_skill_ranges(
+            temperature=sk.temperature, max_tokens=sk.max_tokens
+        )
         ok = skills_manager.update_skill(match.get("name"), {
             "name": sk.name,
             "description": sk.description,
@@ -1962,7 +2021,11 @@ def setup_skills_routes(
             # Active-skill schema extensions (Spec 01) — round-trip the
             # frontmatter through the markdown editor so user edits to
             # triggers, tool gates, priority, pinned-default, temperature,
-            # max_tokens, inject_mode, and safe are persisted.
+            # max_tokens, and inject_mode are persisted. `safe` is
+            # intentionally NOT forwarded here: the markdown editor is a
+            # user-facing path and must not be able to flip the
+            # safety-critical `safe` flag. Only the admin audit flow
+            # (set_safe) may write `safe` (#task-07 fix 2).
             "triggers": sk.triggers,
             "examples": sk.examples,
             "tools_required": sk.tools_required,
@@ -1972,7 +2035,6 @@ def setup_skills_routes(
             "temperature": sk.temperature,
             "max_tokens": sk.max_tokens,
             "inject_mode": sk.inject_mode,
-            "safe": sk.safe,
         }, owner=user)
         if not ok:
             raise HTTPException(500, "Update failed")
@@ -1997,6 +2059,12 @@ def setup_skills_routes(
         # client-side validator checks the same set; this guards against a
         # fetch failure, a hand-crafted PUT, or a third-party client.
         _validate_tool_names(body.tools_required, body.tools_disabled)
+        # Range validation backstop: reject out-of-range temperature /
+        # max_tokens. None is always valid (field cleared or unset); only
+        # a non-None value outside [0,2] / <0 raises HTTP 400.
+        _validate_active_skill_ranges(
+            temperature=body.temperature, max_tokens=body.max_tokens
+        )
 
         # Use exclude_unset=True (NOT exclude_none) so the caller can
         # explicitly send `temperature: null` / `max_tokens: null` to
