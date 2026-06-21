@@ -228,6 +228,8 @@ def _is_default_scalar(key: str, value: Any) -> bool:
         return True
     if key == "inject_mode" and value == "procedure":
         return True
+    if key == "safe" and value is False:
+        return True
     return False
 
 
@@ -236,7 +238,7 @@ _DEFAULT_FM_ORDER = (
     "name", "description", "version", "category",
     "tags", "platforms", "requires_toolsets", "fallback_for_toolsets",
     "triggers", "examples", "tools_required", "tools_disabled",
-    "priority", "pinned", "inject_mode", "temperature", "max_tokens",
+    "priority", "pinned", "inject_mode", "safe", "temperature", "max_tokens",
     "status", "confidence", "source", "teacher_model", "owner", "created",
 )
 
@@ -382,6 +384,7 @@ class Skill:
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     inject_mode: str = "procedure"                    # procedure | directive
+    safe: bool = False
     # Body sections
     when_to_use: str = ""
     procedure: List[str] = field(default_factory=list)
@@ -419,6 +422,7 @@ class Skill:
         fm["priority"] = int(self.priority)
         fm["pinned"] = bool(self.pinned)
         fm["inject_mode"] = self.inject_mode
+        fm["safe"] = bool(self.safe)
         if self.temperature is not None:
             fm["temperature"] = float(self.temperature)
         if self.max_tokens is not None:
@@ -485,6 +489,7 @@ class Skill:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "inject_mode": self.inject_mode,
+            "safe": self.safe,
             "status": self.status,
             "confidence": round(float(self.confidence), 3),
             "source": self.source,
@@ -565,6 +570,7 @@ class Skill:
             temperature=temperature,
             max_tokens=max_tokens,
             inject_mode=inject_mode,
+            safe=_as_bool(fm.get("safe"), default=False),
             when_to_use=sections["when_to_use"],
             procedure=list(sections["procedure"]),
             pitfalls=list(sections["pitfalls"]),

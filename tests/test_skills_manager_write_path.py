@@ -244,3 +244,48 @@ def test_max_tokens_zero_round_trips_through_manager():
 
     sk = Skill.from_markdown(text)
     assert sk.max_tokens == 0
+
+
+def test_add_skill_persists_safe_flag():
+    mgr = _manager()
+    d = mgr.add_skill(
+        title="Safe skill",
+        description="Explicitly safe.",
+        safe=True,
+    )
+    name = d["name"]
+    assert d["safe"] is True
+
+    text = mgr.read_skill_md(name)
+    assert text is not None
+    assert "safe: true" in text
+
+    sk = Skill.from_markdown(text)
+    assert sk.safe is True
+
+
+def test_add_skill_elides_default_safe_false():
+    mgr = _manager()
+    d = mgr.add_skill(title="Default safe flag", description="Safe defaults to false.")
+    name = d["name"]
+    assert d["safe"] is False
+
+    text = mgr.read_skill_md(name)
+    assert text is not None
+    assert "safe:" not in text
+
+
+def test_update_skill_persists_safe_flag():
+    mgr = _manager()
+    d = mgr.add_skill(title="Updatable safe", description="Before safe update.")
+    name = d["name"]
+
+    ok = mgr.update_skill(name, {"safe": True})
+    assert ok is True
+
+    updated = mgr.load_all()[0]
+    assert updated["safe"] is True
+
+    text = mgr.read_skill_md(name)
+    assert text is not None
+    assert "safe: true" in text

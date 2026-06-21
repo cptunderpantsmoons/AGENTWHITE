@@ -202,3 +202,27 @@ def test_new_skill_elides_default_scalar_values():
     assert "priority" not in fm
     assert "pinned" not in fm
     assert "inject_mode" not in fm
+    assert "safe" not in fm
+
+
+def test_safe_field_parses_and_round_trips():
+    yaml = _NEW_FIELDS_YAML.replace("inject_mode: directive", "safe: true\ninject_mode: directive")
+    sk = Skill.from_markdown(yaml)
+    assert sk.safe is True
+
+    md = sk.to_markdown()
+    assert "safe: true" in md
+
+    sk2 = Skill.from_markdown(md)
+    assert sk2.safe is True
+
+
+def test_safe_defaults_to_false():
+    sk = Skill.from_markdown(_NEW_FIELDS_YAML)
+    assert sk.safe is False
+
+
+def test_to_dict_includes_safe():
+    sk = Skill.from_markdown(_NEW_FIELDS_YAML.replace("inject_mode: directive", "safe: true\ninject_mode: directive"))
+    d = sk.to_dict()
+    assert d["safe"] is True

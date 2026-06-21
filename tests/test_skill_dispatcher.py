@@ -375,6 +375,19 @@ class TestToolAndModelOverrides:
         assert res.max_tokens == 2048
         assert res.inject_mode == "directive"
 
+    def test_resolved_skill_safe_flag_defaults_to_false(self):
+        mgr = FakeSkillsManager([_skill("plain", "Plain skill")])
+        dispatcher = SkillDispatcher(mgr)
+        res = dispatcher.resolve_active_skills("/plain")[0]
+        assert res.safe is False
+
+    def test_resolved_skill_safe_flag_read_from_skill(self):
+        mgr = FakeSkillsManager([_skill("safe", "Safe skill", safe=True)])
+        dispatcher = SkillDispatcher(mgr)
+        res = dispatcher.resolve_active_skills("/safe")[0]
+        assert res.safe is True
+        assert res.to_dict()["safe"] is True
+
     def test_max_tokens_zero_preserved_and_missing_is_none(self):
         mgr = FakeSkillsManager(
             [

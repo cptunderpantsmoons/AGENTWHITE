@@ -322,6 +322,7 @@ class SkillsManager:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         inject_mode: str = "procedure",
+        safe: bool = False,
         status: str = "draft",
         version: str = "1.0.0",
     ) -> Dict:
@@ -389,6 +390,7 @@ class SkillsManager:
             temperature=temperature,
             max_tokens=max_tokens,
             inject_mode=inject_mode,
+            safe=bool(safe),
             status=status or "draft",
             confidence=float(confidence),
             source=source,
@@ -485,7 +487,7 @@ class SkillsManager:
                 "description", "version", "category", "status", "confidence",
                 "source", "teacher_model", "when_to_use",
                 "body_extra", "priority", "pinned", "temperature",
-                "max_tokens", "inject_mode",
+                "max_tokens", "inject_mode", "safe",
             )
             for k in scalar_keys:
                 if k in updates:

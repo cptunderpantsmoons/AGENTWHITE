@@ -105,7 +105,10 @@ class TestComputeGatedToolSet:
     def test_returns_none_when_no_relevant_tools(self):
         assert agent_loop._compute_gated_tool_set(None, [], None) is None
 
-    def test_preserves_always_available_by_default(self):
+    def test_preserves_always_available_by_default(self, monkeypatch):
+        monkeypatch.setattr(
+            agent_loop, "blocked_tools_for_owner", lambda owner: set(), raising=False
+        )
         result = agent_loop._compute_gated_tool_set(set(), [], None)
         assert result is not None
         assert sys.modules["src.tool_index"].ALWAYS_AVAILABLE <= result
@@ -193,6 +196,19 @@ class TestComputeGatedToolSet:
         assert "ask_user" in result
         assert "update_plan" in result
 
+    def test_always_available_filtered_by_owner_privilege(self, monkeypatch):
+        monkeypatch.setattr(
+            agent_loop, "blocked_tools_for_owner", lambda owner: {"manage_memory"}, raising=False
+        )
+        result = agent_loop._compute_gated_tool_set(
+            set(),
+            [],
+            "user@example.com",
+        )
+        assert "manage_memory" not in result
+        assert "ask_user" in result
+        assert "update_plan" in result
+
 
 class TestToolGatingInPrompt:
     """Gated tool sets are reflected in the system prompt."""
@@ -253,7 +269,6 @@ class TestStreamAgentLoopToolGating:
 
         monkeypatch.setattr(agent_loop, "SkillDispatcher", FakeDispatcher, raising=False)
         monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set(), raising=False)
-        monkeypatch.setattr(agent_loop, "owner_is_admin_or_single_user", lambda owner: True, raising=False)
         monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None, raising=False)
         monkeypatch.setattr(agent_loop, "estimate_tokens", lambda *a, **k: 10, raising=False)
         monkeypatch.setattr(agent_loop, "strip_tool_blocks", lambda text, skip_fenced=False: text, raising=False)

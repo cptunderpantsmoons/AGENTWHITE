@@ -1450,9 +1450,10 @@ def _compute_gated_tool_set(
     # Active-skill disabled tools override active-skill required tools.
     effective -= skill_disabled
 
-    # Preserve ALWAYS_AVAILABLE unless an active skill explicitly disabled it.
+    # Preserve ALWAYS_AVAILABLE unless an active skill explicitly disabled it,
+    # but never restore a tool the owner is not privileged to use.
     always_available = set(ALWAYS_AVAILABLE)
-    effective |= always_available - skill_disabled
+    effective |= (always_available - skill_disabled) - blocked
 
     logger.info(
         "[tool-gating] effective_tools=%s required=%s disabled=%s owner=%s",
